@@ -33,26 +33,68 @@ var summaries = new[]
     "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
 };
 
-app.MapGet("/weatherforecast", (HttpContext httpContext) =>
+app.MapGet("/healthz", () => "Healthy");
+app.MapGet("/articles", async context =>
 {
-    httpContext.VerifyUserHasAnyAcceptedScope(scopeRequiredByApi);
+    var articles = await GetArticlesAsync();
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsJsonAsync(articles);
+});
+app.MapGet("/articles/{slug}", async context =>
+{
+    var slug = context.Request.RouteValues["slug"] as string;
+    if (string.IsNullOrEmpty(slug))
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("Invalid slug");
+        return;
+    }
 
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.RequireAuthorization();
+    var article = await GetArticleBySlugAsync(slug);
+    if (article == null)
+    {
+        context.Response.StatusCode = 404;
+        await context.Response.WriteAsync("Article not found");
+        return;
+    }
+
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsJsonAsync(article);
+});
 
 app.Run();
 
-internal record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
+async Task<List<Article>> GetArticlesAsync()
 {
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    // In-memory fake implementation
+    return new List<Article>
+    {
+        new Article { Id = 1, Slug = "first-article", Title = "First Article", Summary = "Summary of first article", Content = "Content of first article", PublishedAt = DateTime.Now, Tags = new List<string> { "tag1" } },
+        new Article { Id = 2, Slug = "second-article", Title = "Second Article", Summary = "Summary of second article", Content = "Content of second article", PublishedAt = DateTime.Now, Tags = new List<string> { "tag2" } }
+    };
+}
+
+async Task<Article?> GetArticleBySlugAsync(string slug)
+{
+    // In-memory fake implementation
+    return await Task.FromResult(GetArticlesAsync().Result.FirstOrDefault(a => a.Slug == slug));
+}
+
+public record Article(int Id, string Slug, string Title, string Summary, string Content, DateTime PublishedAt, List<string> Tags);
+public interface IArticleRepository
+{
+    Task<List<Article>> GetArticlesAsync();
+    Task<Article?> GetArticleBySlugAsync(string slug);
+}
+public class InMemoryArticleRepository : IArticleRepository
+{
+    public async Task<List<Article>> GetArticlesAsync()
+    {
+        return await Task.FromResult(GetArticlesAsync().Result);
+    }
+
+    public async Task<Article?> GetArticleBySlugAsync(string slug)
+    {
+        return await Task.FromResult(GetArticleBySlugAsync(slug).Result);
+    }
 }
