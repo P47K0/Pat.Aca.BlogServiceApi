@@ -53,9 +53,19 @@ namespace Pat.Aca.BlogServiceApi
             return null;
         }
 
-        public Task<List<Article>> GetArticlesAsync()
+        public async Task<List<Article>> GetArticlesAsync()
         {
-            throw new NotImplementedException();
+            var query = "SELECT * FROM c";
+            var feedIterator = _container.GetItemQueryIterator<Article>(query);
+
+            List<Article> articles = new();
+            while (feedIterator.HasMoreResults)
+            {
+                var response = await feedIterator.ReadNextAsync();
+                articles.AddRange(response.Resource);
+            }
+
+            return articles;
         }
 
         public async Task<Article?> GetBySlugAsync(string slug)
