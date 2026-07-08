@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc.Testing;
+using System.Net.Http.Json;
 using Xunit;
 
 namespace Pat.ACA.BlogServiceTests
@@ -30,7 +31,7 @@ namespace Pat.ACA.BlogServiceTests
             var response = await client.GetAsync("/articles");
 
             response.EnsureSuccessStatusCode();
-            var articles = await response.Content.ReadAsAsync<List<Article>>();
+            var articles = await response.Content.ReadFromJsonAsync<List<Article>>();
 
             Assert.NotEmpty(articles);
         }
