@@ -9,6 +9,18 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
+
+var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosDbSettings>();
+if (cosmosDbSettings != null)
+{
+    builder.Services.AddSingleton<IArticleRepository, CosmosArticleRepository>(provider =>
+        new CosmosArticleRepository(cosmosDbSettings.EndpointUri, cosmosDbSettings.PrimaryKey));
+}
+else
+{
+    builder.Services.AddSingleton<IArticleRepository, InMemoryArticleRepository>();
+}
+
 builder.Services.AddAuthorization();
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -28,6 +40,16 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 var scopeRequiredByApi = app.Configuration["AzureAd:Scopes"] ?? "";
+var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosDbSettings>();
+if (cosmosDbSettings != null)
+{
+    var articleRepository = new CosmosArticleRepository(cosmosDbSettings.EndpointUri, cosmosDbSettings.PrimaryKey);
+}
+else
+{
+    var articleRepository = new InMemoryArticleRepository();
+}
+
 var summaries = new[]
 {
     "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
@@ -50,12 +72,27 @@ app.MapGet("/articles/{slug}", async context =>
         return;
     }
 
-    var article = await GetArticleBySlugAsync(slug);
-    if (article == null)
+    var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosDbSettings>();
+    if (cosmosDbSettings != null)
     {
-        context.Response.StatusCode = 404;
-        await context.Response.WriteAsync("Article not found");
-        return;
+        var articleRepository = new CosmosArticleRepository(cosmosDbSettings.EndpointUri, cosmosDbSettings.PrimaryKey);
+        var article = await articleRepository.GetArticleBySlugAsync(slug);
+        if (article == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("Article not found");
+            return;
+        }
+    }
+    else
+    {
+        var article = await GetArticleBySlugAsync(slug);
+        if (article == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("Article not found");
+            return;
+        }
     }
 
     context.Response.ContentType = "application/json";
@@ -86,15 +123,9 @@ public interface IArticleRepository
     Task<List<Article>> GetArticlesAsync();
     Task<Article?> GetArticleBySlugAsync(string slug);
 }
-public class InMemoryArticleRepository : IArticleRepository
-{
-    public async Task<List<Article>> GetArticlesAsync()
-    {
-        return await Task.FromResult(GetArticlesAsync().Result);
-    }
 
-    public async Task<Article?> GetArticleBySlugAsync(string slug)
-    {
-        return await Task.FromResult(GetArticleBySlugAsync(slug).Result);
-    }
+public class CosmosDbSettings
+{
+    public string EndpointUri { get; set; }
+    public string PrimaryKey { get; set; }
 }
