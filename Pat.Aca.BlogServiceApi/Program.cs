@@ -69,8 +69,8 @@ async Task<List<Article>> GetArticlesAsync()
     // In-memory fake implementation
     return new List<Article>
     {
-        new Article { Id = 1, Slug = "first-article", Title = "First Article", Summary = "Summary of first article", Content = "Content of first article", PublishedAt = DateTime.Now, Tags = new List<string> { "tag1" } },
-        new Article { Id = 2, Slug = "second-article", Title = "Second Article", Summary = "Summary of second article", Content = "Content of second article", PublishedAt = DateTime.Now, Tags = new List<string> { "tag2" } }
+        new Article(1, "first-article", "First Article", "Summary of first article", "Content of first article", DateTime.Now, new List<string> { "tag1" }),
+        new Article(2, "second-article", "Second Article", "Summary of second article", "Content of second article", DateTime.Now, new List<string> { "tag2" })
     };
 }
 
