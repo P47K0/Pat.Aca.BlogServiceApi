@@ -31,7 +31,7 @@ namespace Pat.ACA.BlogServiceTests
             var response = await client.GetAsync("/articles");
 
             response.EnsureSuccessStatusCode();
-            var articles = await response.Content.ReadFromJsonAsync<List<Article>>();
+            var articles = await response.Content.ReadAsAsync<List<Article>>();
 
             Assert.NotEmpty(articles);
         }
