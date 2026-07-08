@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="Pat.Aca.BlogServiceApi/Pat.Aca.BlogServiceApi.csproj" />
+  <Project Path="Pat.ACA.BlogServiceTests/Pat.ACA.BlogServiceApiTests.csproj" />
 </Solution>

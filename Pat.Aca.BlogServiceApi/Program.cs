@@ -3,23 +3,13 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Identity.Abstractions;
 using Microsoft.Identity.Web;
 using Microsoft.Identity.Web.Resource;
+using Pat.Aca.BlogServiceApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
-
-var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosDbSettings>();
-if (cosmosDbSettings != null)
-{
-    builder.Services.AddSingleton<IArticleRepository, CosmosArticleRepository>(provider =>
-        new CosmosArticleRepository(cosmosDbSettings.EndpointUri, cosmosDbSettings.PrimaryKey));
-}
-else
-{
-    builder.Services.AddSingleton<IArticleRepository, InMemoryArticleRepository>();
-}
 
 builder.Services.AddAuthorization();
 
@@ -43,7 +33,7 @@ var scopeRequiredByApi = app.Configuration["AzureAd:Scopes"] ?? "";
 var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosDbSettings>();
 if (cosmosDbSettings != null)
 {
-    var articleRepository = new CosmosArticleRepository(cosmosDbSettings.EndpointUri, cosmosDbSettings.PrimaryKey);
+    var articleRepository = new CosmosArticleRepository(cosmosDbSettings.EndpointUri);
 }
 else
 {
@@ -72,11 +62,12 @@ app.MapGet("/articles/{slug}", async context =>
         return;
     }
 
+    Article? article = null;
     var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosDbSettings>();
     if (cosmosDbSettings != null)
     {
-        var articleRepository = new CosmosArticleRepository(cosmosDbSettings.EndpointUri, cosmosDbSettings.PrimaryKey);
-        var article = await articleRepository.GetArticleBySlugAsync(slug);
+        var articleRepository = new CosmosArticleRepository(cosmosDbSettings.EndpointUri);
+        article = await articleRepository.GetArticleBySlugAsync(slug);
         if (article == null)
         {
             context.Response.StatusCode = 404;
@@ -86,7 +77,7 @@ app.MapGet("/articles/{slug}", async context =>
     }
     else
     {
-        var article = await GetArticleBySlugAsync(slug);
+        article = await GetArticleBySlugAsync(slug);
         if (article == null)
         {
             context.Response.StatusCode = 404;
@@ -129,3 +120,19 @@ public class CosmosDbSettings
     public string EndpointUri { get; set; }
     public string PrimaryKey { get; set; }
 }
+
+public class InMemoryArticleRepository : IArticleRepository
+{
+    public async Task<List<Article>> GetArticlesAsync()
+    {
+        return await Task.FromResult(GetArticlesAsync().Result);
+    }
+
+    public async Task<Article?> GetArticleBySlugAsync(string slug)
+    {
+        return await Task.FromResult(GetArticleBySlugAsync(slug).Result);
+    }
+}
+// TODO:
+// dotnet ef migrations add InitialCreate
+// dotnet ef database update

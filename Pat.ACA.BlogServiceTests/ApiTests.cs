@@ -4,11 +4,11 @@ using Xunit;
 
 namespace Pat.ACA.BlogServiceTests
 {
-    public class ArticlesApiTests : IClassFixture<WebApplicationFactory<Program>>
+    public class ApiTests : IClassFixture<WebApplicationFactory<Program>>
     {
         private readonly WebApplicationFactory<Program> _factory;
 
-        public ArticlesApiTests(WebApplicationFactory<Program> factory)
+        public ApiTests(WebApplicationFactory<Program> factory)
         {
             _factory = factory;
         }
@@ -31,7 +31,7 @@ namespace Pat.ACA.BlogServiceTests
             var response = await client.GetAsync("/articles");
 
             response.EnsureSuccessStatusCode();
-            var articles = await response.Content.ReadAsAsync<List<Article>>();
+            var articles = await response.Content.ReadFromJsonAsync<List<Article>>();
 
             Assert.NotEmpty(articles);
         }

@@ -1,5 +1,7 @@
-using Microsoft.Extensions.Options;
+using Azure.Core;
+using Azure.Identity;
 using Microsoft.Azure.Cosmos;
+using Microsoft.Extensions.Options;
 
 namespace Pat.Aca.BlogServiceApi
 {
@@ -9,9 +11,15 @@ namespace Pat.Aca.BlogServiceApi
         private readonly Database _database;
         private readonly Container _container;
 
-        public CosmosArticleRepository(CosmosClientOptions options)
+        public CosmosArticleRepository(string endpointUri)
         {
-            _cosmosClient = new CosmosClient(options.EndpointUrl, options.AuthKey);
+            TokenCredential credential = new DefaultAzureCredential();
+
+            _cosmosClient = new CosmosClient(
+                accountEndpoint: endpointUri,
+                tokenCredential: credential,
+                clientOptions: new CosmosClientOptions());
+
             _database = _cosmosClient.GetDatabase("ArticlesDB");
             _container = _database.GetContainer("Articles");
         }
@@ -29,6 +37,16 @@ namespace Pat.Aca.BlogServiceApi
             }
 
             return articles;
+        }
+
+        public Task<Article?> GetArticleBySlugAsync(string slug)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<List<Article>> GetArticlesAsync()
+        {
+            throw new NotImplementedException();
         }
 
         public async Task<Article?> GetBySlugAsync(string slug)
