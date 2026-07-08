@@ -16,7 +16,7 @@ namespace Pat.Aca.BlogServiceApi
             _container = _database.GetContainer("Articles");
         }
 
-        public async Task<List<Article>> GetArticlesAsync()
+        public async Task<List<Article>> GetAllAsync()
         {
             var query = "SELECT * FROM c";
             var feedIterator = _container.GetItemQueryIterator<Article>(query);
@@ -31,7 +31,7 @@ namespace Pat.Aca.BlogServiceApi
             return articles;
         }
 
-        public async Task<Article?> GetArticleBySlugAsync(string slug)
+        public async Task<Article?> GetBySlugAsync(string slug)
         {
             var query = $"SELECT * FROM c WHERE c.Slug = '{slug}'";
             var feedIterator = _container.GetItemQueryIterator<Article>(query);
