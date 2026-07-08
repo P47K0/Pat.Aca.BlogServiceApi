@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "identityapp1": {
+      "connectionInfo": "App registration: pat.aca.blog, Tenant: Q-Vend B.V. (q-vend.nl - Microsoft Entra ID)",
+      "type": "identityapp.default"
+    }
+  }
+}
