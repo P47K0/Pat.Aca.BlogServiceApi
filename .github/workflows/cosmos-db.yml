@@ -18,6 +18,14 @@ on:
           `az containerapp show --name blog-service-api --resource-group <rg>
           --query identity.principalId -o tsv`.
         required: true
+      location:
+        description: >
+          Azure region for the Cosmos DB account, e.g. northeurope,
+          swedencentral. Leave blank to use the resource group's own region.
+          Override this if that region is out of Cosmos capacity (a
+          'ServiceUnavailable' error) — the account name doesn't depend on
+          location, so it's safe to retry here with a different value.
+        required: false
 
 jobs:
   deploy:
@@ -43,13 +51,21 @@ jobs:
 
       - name: Deploy Cosmos DB (Bicep)
         shell: bash
+        env:
+          LOCATION: ${{ inputs.location }}
         run: |
           set -euo pipefail
+
+          params=(blogServicePrincipalId="${{ inputs.blogServicePrincipalId }}")
+          if [ -n "$LOCATION" ]; then
+            echo "Overriding Cosmos DB account location: $LOCATION"
+            params+=(location="$LOCATION")
+          fi
 
           az deployment group create \
             --resource-group "$RESOURCE_GROUP" \
             --template-file infra/cosmos-db.bicep \
-            --parameters blogServicePrincipalId="${{ inputs.blogServicePrincipalId }}"
+            --parameters "${params[@]}"
 
       - name: Show Cosmos DB endpoint
         shell: bash
