@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Identity.Abstractions;
 using Microsoft.Identity.Web;
 using Microsoft.Identity.Web.Resource;
+using Microsoft.OpenApi;
 using Pat.Aca.BlogServiceApi;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,6 +15,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
 
 builder.Services.AddAuthorization();
+
+// Standardizes error bodies as RFC 7807 ProblemDetails JSON. Combined with
+// UseStatusCodePages() below, this covers both explicit Results.Problem(...)
+// calls and otherwise-empty error responses (unmatched routes, the bare 401
+// from Results.Unauthorized(), the rate limiter's 429) with one consistent
+// shape, instead of a mix of plain strings and ad hoc bodies.
+builder.Services.AddProblemDetails();
 
 var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosSettings>();
 var cosmosConfigured = cosmosDbSettings is not null
@@ -32,28 +40,62 @@ else
 }
 
 const string ArticlesRateLimiterPolicy = "articles";
+const string ApiKeyHeaderName = ApiSecurity.ApiKeyHeaderName;
 
-// Throttle the public read endpoints the Cloudflare Worker calls. Partitioned by
-// client IP for now; revisit once API-key auth is wired up so the Worker's own
-// key (rather than its shared egress IP) can be used as the partition key.
+// Shared secret the Cloudflare Worker sends on the article endpoints' behalf.
+// Not set via DefaultAzureCredential/Cosmos-style fallback on purpose — the BRD
+// calls for a single static key, kept simple, separate from the Azure AD path
+// reserved for a future admin/write API.
+var apiKey = builder.Configuration["ApiKey"];
+
+// Throttle the public read endpoints the Cloudflare Worker calls. Partition
+// selection and options construction live in ApiSecurity (unit-tested there)
+// — this just wires them in.
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
     options.AddPolicy(ArticlesRateLimiterPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 60,
-                Window = TimeSpan.FromMinutes(1),
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                QueueLimit = 0
-            }));
+            ApiSecurity.GetRateLimitPartitionKey(httpContext),
+            factory: _ => ApiSecurity.CreateArticlesLimiterOptions(permitLimit: 60, window: TimeSpan.FromMinutes(1))));
 });
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer((document, _, _) =>
+    {
+        document.Components ??= new();
+        // Just assigned above — the nullable analyzer doesn't trust that across a
+        // property re-read, so this collapses it to one known-safe suppression.
+        var components = document.Components!;
+        components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+        components.SecuritySchemes["ApiKey"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.ApiKey,
+            In = ParameterLocation.Header,
+            Name = ApiKeyHeaderName,
+            Description = "Shared-secret key sent by the Cloudflare Worker on behalf of the frontend."
+        };
+
+        // Only the article endpoints require the key — /healthz stays open.
+        var articleOperations = document.Paths
+            .Where(path => path.Key.StartsWith("/articles", StringComparison.Ordinal))
+            .SelectMany(path => path.Value.Operations!.Values);
+
+        foreach (var operation in articleOperations)
+        {
+            operation.Security ??= [];
+            operation.Security.Add(new()
+            {
+                [new OpenApiSecuritySchemeReference("ApiKey", document)] = []
+            });
+        }
+
+        return Task.CompletedTask;
+    });
+});
 
 var app = builder.Build();
 
@@ -67,6 +109,12 @@ else
 {
     app.Logger.LogWarning(
         "CosmosDb config is incomplete (need a valid absolute EndpointUri, Database, and Container) — falling back to InMemoryArticleRepository.");
+}
+
+if (string.IsNullOrEmpty(apiKey))
+{
+    app.Logger.LogWarning(
+        "ApiKey is not configured — article endpoints will reject every request (fail closed) until it's set.");
 }
 
 // Code-first provisioning, local emulator only: never auto-creates a database or
@@ -104,6 +152,10 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+// Must wrap everything downstream that can produce a bare error status code,
+// so it belongs early in the pipeline, before auth/rate limiting/endpoints.
+app.UseStatusCodePages();
+
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
@@ -112,58 +164,42 @@ app.UseRateLimiter();
 
 var scopeRequiredByApi = app.Configuration["AzureAd:Scopes"] ?? "";
 
+// The actual check lives in ApiSecurity (unit-tested there); this just
+// supplies the configured key from the closure.
+ValueTask<object?> RequireApiKey(EndpointFilterInvocationContext context, EndpointFilterDelegate next) =>
+    ApiSecurity.RequireApiKey(context, next, apiKey);
+
 app.MapGet("/healthz", () => "Healthy");
 
 app.MapGet("/articles", async (IArticleRepository articleRepository) =>
 {
     var articles = await articleRepository.GetArticlesAsync();
     return Results.Json(articles);
-}).RequireRateLimiting(ArticlesRateLimiterPolicy);
+})
+    .RequireRateLimiting(ArticlesRateLimiterPolicy)
+    .AddEndpointFilter(RequireApiKey);
 
 app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleRepository articleRepository) =>
 {
     if (string.IsNullOrEmpty(slug))
     {
-        return Results.BadRequest("Invalid slug");
+        return Results.Problem("Invalid slug", statusCode: StatusCodes.Status400BadRequest);
     }
 
     var article = await articleRepository.GetArticleBySlugAsync(slug);
-    return article is null ? Results.NotFound("Article not found") : Results.Json(article);
-}).RequireRateLimiting(ArticlesRateLimiterPolicy);
+    return article is null
+        ? Results.Problem("Article not found", statusCode: StatusCodes.Status404NotFound)
+        : Results.Json(article);
+})
+    .RequireRateLimiting(ArticlesRateLimiterPolicy)
+    .AddEndpointFilter(RequireApiKey);
 
 app.Run();
 
-public record Article(int Id, string Slug, string Title, string Summary, string Content, DateTime PublishedAt, List<string> Tags);
-public interface IArticleRepository
-{
-    Task<List<Article>> GetArticlesAsync();
-    Task<Article?> GetArticleBySlugAsync(string slug);
-}
+// Article, IArticleRepository, CosmosSettings, and InMemoryArticleRepository
+// now live in their own files (see Article.cs, IArticleRepository.cs,
+// CosmosSettings.cs, InMemoryArticleRepository.cs).
 
-public sealed class CosmosSettings
-{
-    public string EndpointUri { get; set; } = string.Empty;
-    public string Database { get; set; } = string.Empty;
-    public string Container { get; set; } = string.Empty;
-
-    // Set for key-based auth (e.g. the local Cosmos DB Emulator). Left unset,
-    // CosmosArticleRepository authenticates via DefaultAzureCredential instead.
-    public string? PrimaryKey { get; set; }
-}
-
-public class InMemoryArticleRepository : IArticleRepository
-{
-    private static readonly List<Article> SeedArticles = new()
-    {
-        new Article(1, "first-article", "First Article", "Summary of first article", "Content of first article", DateTime.UtcNow, new List<string> { "tag1" }),
-        new Article(2, "second-article", "Second Article", "Summary of second article", "Content of second article", DateTime.UtcNow, new List<string> { "tag2" })
-    };
-
-    public Task<List<Article>> GetArticlesAsync() => Task.FromResult(SeedArticles);
-
-    public Task<Article?> GetArticleBySlugAsync(string slug) =>
-        Task.FromResult(SeedArticles.FirstOrDefault(a => a.Slug == slug));
-}
 // TODO:
 // dotnet ef migrations add InitialCreate
 // dotnet ef database update

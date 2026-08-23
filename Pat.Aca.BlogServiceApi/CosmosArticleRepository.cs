@@ -81,9 +81,12 @@ namespace Pat.Aca.BlogServiceApi
 
         public async Task<Article?> GetArticleBySlugAsync(string slug)
         {
+            // BRD: a scheduled (future publishedAt) article 404s on direct lookup
+            // too, same as it's excluded from GetArticlesAsync.
             var query = new QueryDefinition(
-                "SELECT * FROM c WHERE c.slug = @slug")
-                .WithParameter("@slug", slug);
+                "SELECT * FROM c WHERE c.slug = @slug AND c.publishedAt <= @now")
+                .WithParameter("@slug", slug)
+                .WithParameter("@now", DateTime.UtcNow);
 
             using FeedIterator<Article> iterator = _container.GetItemQueryIterator<Article>(query);
 
@@ -102,7 +105,11 @@ namespace Pat.Aca.BlogServiceApi
 
         public async Task<List<Article>> GetArticlesAsync()
         {
-            var query = new QueryDefinition("SELECT * FROM c");
+            // BRD: newest-first, and a future publishedAt means "scheduled" —
+            // excluded from public results until that time passes.
+            var query = new QueryDefinition(
+                "SELECT * FROM c WHERE c.publishedAt <= @now ORDER BY c.publishedAt DESC")
+                .WithParameter("@now", DateTime.UtcNow);
 
             using FeedIterator<Article> iterator = _container.GetItemQueryIterator<Article>(query);
             List<Article> articles = new();
