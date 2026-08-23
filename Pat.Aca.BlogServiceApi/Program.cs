@@ -1,5 +1,7 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Identity.Abstractions;
 using Microsoft.Identity.Web;
 using Microsoft.Identity.Web.Resource;
@@ -13,10 +15,57 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
+var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosSettings>();
+var cosmosConfigured = cosmosDbSettings is not null
+    && Uri.TryCreate(cosmosDbSettings.EndpointUri, UriKind.Absolute, out _);
+
+if (cosmosConfigured)
+{
+    builder.Services.AddSingleton(cosmosDbSettings!);
+    builder.Services.AddSingleton<IArticleRepository, CosmosArticleRepository>();
+}
+else
+{
+    builder.Services.AddSingleton<IArticleRepository, InMemoryArticleRepository>();
+}
+
+const string ArticlesRateLimiterPolicy = "articles";
+
+// Throttle the public read endpoints the Cloudflare Worker calls. Partitioned by
+// client IP for now; revisit once API-key auth is wired up so the Worker's own
+// key (rather than its shared egress IP) can be used as the partition key.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy(ArticlesRateLimiterPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            }));
+});
+
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
+
+if (cosmosConfigured)
+{
+    app.Logger.LogInformation(
+        "CosmosDb configured (endpoint {EndpointUri}) — using CosmosArticleRepository.",
+        cosmosDbSettings!.EndpointUri);
+}
+else
+{
+    app.Logger.LogWarning(
+        "CosmosDb:EndpointUri is missing or not a valid absolute URI — falling back to InMemoryArticleRepository.");
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -28,85 +77,30 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 var scopeRequiredByApi = app.Configuration["AzureAd:Scopes"] ?? "";
-var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosDbSettings>();
-if (cosmosDbSettings != null)
-{
-    var articleRepository = new CosmosArticleRepository(cosmosDbSettings.EndpointUri);
-}
-else
-{
-    var articleRepository = new InMemoryArticleRepository();
-}
-
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
 
 app.MapGet("/healthz", () => "Healthy");
-app.MapGet("/articles", async context =>
+
+app.MapGet("/articles", async (IArticleRepository articleRepository) =>
 {
-    var articles = await GetArticlesAsync();
-    context.Response.ContentType = "application/json";
-    await context.Response.WriteAsJsonAsync(articles);
-});
-app.MapGet("/articles/{slug}", async context =>
+    var articles = await articleRepository.GetArticlesAsync();
+    return Results.Json(articles);
+}).RequireRateLimiting(ArticlesRateLimiterPolicy);
+
+app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleRepository articleRepository) =>
 {
-    var slug = context.Request.RouteValues["slug"] as string;
     if (string.IsNullOrEmpty(slug))
     {
-        context.Response.StatusCode = 400;
-        await context.Response.WriteAsync("Invalid slug");
-        return;
+        return Results.BadRequest("Invalid slug");
     }
 
-    Article? article = null;
-    var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosDbSettings>();
-    if (cosmosDbSettings != null)
-    {
-        var articleRepository = new CosmosArticleRepository(cosmosDbSettings.EndpointUri);
-        article = await articleRepository.GetArticleBySlugAsync(slug);
-        if (article == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("Article not found");
-            return;
-        }
-    }
-    else
-    {
-        article = await GetArticleBySlugAsync(slug);
-        if (article == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("Article not found");
-            return;
-        }
-    }
-
-    context.Response.ContentType = "application/json";
-    await context.Response.WriteAsJsonAsync(article);
-});
+    var article = await articleRepository.GetArticleBySlugAsync(slug);
+    return article is null ? Results.NotFound("Article not found") : Results.Json(article);
+}).RequireRateLimiting(ArticlesRateLimiterPolicy);
 
 app.Run();
-
-async Task<List<Article>> GetArticlesAsync()
-{
-    // In-memory fake implementation
-    return new List<Article>
-    {
-        new Article(1, "first-article", "First Article", "Summary of first article", "Content of first article", DateTime.Now, new List<string> { "tag1" }),
-        new Article(2, "second-article", "Second Article", "Summary of second article", "Content of second article", DateTime.Now, new List<string> { "tag2" })
-    };
-}
-
-async Task<Article?> GetArticleBySlugAsync(string slug)
-{
-    // In-memory fake implementation
-    return await Task.FromResult(GetArticlesAsync().Result.FirstOrDefault(a => a.Slug == slug));
-}
 
 public record Article(int Id, string Slug, string Title, string Summary, string Content, DateTime PublishedAt, List<string> Tags);
 public interface IArticleRepository
@@ -115,23 +109,25 @@ public interface IArticleRepository
     Task<Article?> GetArticleBySlugAsync(string slug);
 }
 
-public class CosmosDbSettings
+public sealed class CosmosSettings
 {
-    public string EndpointUri { get; set; }
-    public string PrimaryKey { get; set; }
+    public string EndpointUri { get; set; } = string.Empty;
+    public string Database { get; set; } = string.Empty;
+    public string Container { get; set; } = string.Empty;
 }
 
 public class InMemoryArticleRepository : IArticleRepository
 {
-    public async Task<List<Article>> GetArticlesAsync()
+    private static readonly List<Article> SeedArticles = new()
     {
-        return await Task.FromResult(GetArticlesAsync().Result);
-    }
+        new Article(1, "first-article", "First Article", "Summary of first article", "Content of first article", DateTime.UtcNow, new List<string> { "tag1" }),
+        new Article(2, "second-article", "Second Article", "Summary of second article", "Content of second article", DateTime.UtcNow, new List<string> { "tag2" })
+    };
 
-    public async Task<Article?> GetArticleBySlugAsync(string slug)
-    {
-        return await Task.FromResult(GetArticleBySlugAsync(slug).Result);
-    }
+    public Task<List<Article>> GetArticlesAsync() => Task.FromResult(SeedArticles);
+
+    public Task<Article?> GetArticleBySlugAsync(string slug) =>
+        Task.FromResult(SeedArticles.FirstOrDefault(a => a.Slug == slug));
 }
 // TODO:
 // dotnet ef migrations add InitialCreate
