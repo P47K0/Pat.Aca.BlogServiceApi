@@ -17,7 +17,9 @@ builder.Services.AddAuthorization();
 
 var cosmosDbSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosSettings>();
 var cosmosConfigured = cosmosDbSettings is not null
-    && Uri.TryCreate(cosmosDbSettings.EndpointUri, UriKind.Absolute, out _);
+    && Uri.TryCreate(cosmosDbSettings.EndpointUri, UriKind.Absolute, out _)
+    && !string.IsNullOrWhiteSpace(cosmosDbSettings.Database)
+    && !string.IsNullOrWhiteSpace(cosmosDbSettings.Container);
 
 if (cosmosConfigured)
 {
@@ -64,13 +66,42 @@ if (cosmosConfigured)
 else
 {
     app.Logger.LogWarning(
-        "CosmosDb:EndpointUri is missing or not a valid absolute URI — falling back to InMemoryArticleRepository.");
+        "CosmosDb config is incomplete (need a valid absolute EndpointUri, Database, and Container) — falling back to InMemoryArticleRepository.");
+}
+
+// Code-first provisioning, local emulator only: never auto-creates a database or
+// container against a real Azure Cosmos account. Failures here are logged, not
+// fatal — e.g. the emulator container may simply not be up yet — so a single
+// dev-convenience step never takes down the whole app at startup.
+if (app.Services.GetRequiredService<IArticleRepository>() is CosmosArticleRepository { IsLocalEmulator: true } cosmosRepository)
+{
+    app.Logger.LogInformation("Local Cosmos DB Emulator detected — ensuring database/container exist.");
+    try
+    {
+        await cosmosRepository.EnsureContainerExistsAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(
+            ex,
+            "Could not reach the Cosmos DB Emulator to provision the database/container. " +
+            "Is it running? Article endpoints will fail until it's reachable.");
+    }
 }
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+
+    // Swagger UI reads the OpenAPI document MapOpenApi() already serves at
+    // /openapi/v1.json — this only adds the browsable UI, not a second
+    // document generator. Dev-only: not something to expose publicly.
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/openapi/v1.json", "Blog Service API v1");
+        options.RoutePrefix = "swagger";
+    });
 }
 
 app.UseHttpsRedirection();
@@ -114,6 +145,10 @@ public sealed class CosmosSettings
     public string EndpointUri { get; set; } = string.Empty;
     public string Database { get; set; } = string.Empty;
     public string Container { get; set; } = string.Empty;
+
+    // Set for key-based auth (e.g. the local Cosmos DB Emulator). Left unset,
+    // CosmosArticleRepository authenticates via DefaultAzureCredential instead.
+    public string? PrimaryKey { get; set; }
 }
 
 public class InMemoryArticleRepository : IArticleRepository
