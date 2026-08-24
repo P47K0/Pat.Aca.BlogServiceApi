@@ -1,5 +1,5 @@
 @description('Cosmos DB account name')
-param accountName string = 'cosmos-koorevaar}'
+param accountName string = 'cosmos-koorevaar'
 
 @description('Azure region for the Cosmos DB account')
 param location string = resourceGroup().location
