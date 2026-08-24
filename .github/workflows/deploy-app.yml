@@ -23,7 +23,7 @@ jobs:
       ACA_ENV_NAME: ${{ vars.ACA_ENVIRONMENT_NAME }}
       APP_NAME: blog-service-api
       ARTICLES_API_KEY: ${{ secrets.ARTICLES_API_KEY }}
-      COSMOS_ENDPOINT_URI: ${{ vars.COSMOS_ENDPOINT_URI }}
+      COSMOS_ENDPOINT_URI: ${{ secrets.COSMOS_ENDPOINT_URI }}
 
     steps:
       - name: Checkout

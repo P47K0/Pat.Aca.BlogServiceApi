@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo -n "Cosmos endpoint (set as the COSMOS_ENDPOINT_URI repo variable for the Deploy workflow): "
+          echo -n "Cosmos endpoint (set as the COSMOS_ENDPOINT_URI repo SECRET, not a variable, for the Deploy workflow): "
           az deployment group show \
             --resource-group "$RESOURCE_GROUP" \
             --name cosmos-db \
