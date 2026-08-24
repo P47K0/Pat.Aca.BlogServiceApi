@@ -56,6 +56,13 @@ namespace Pat.Aca.BlogServiceApi
             }
             else
             {
+                // Direct mode (the SDK default) needs a wide outbound TCP port
+                // range straight to the Cosmos backend nodes, which restricted
+                // container networking (Azure Container Apps included) doesn't
+                // reliably support — Gateway mode routes everything over HTTPS
+                // instead, same as the emulator branch above.
+                clientOptions.ConnectionMode = ConnectionMode.Gateway;
+
                 TokenCredential credential = new DefaultAzureCredential();
 
                 _cosmosClient = new CosmosClient(
