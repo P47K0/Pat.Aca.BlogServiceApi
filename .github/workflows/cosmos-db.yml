@@ -26,6 +26,13 @@ on:
           'ServiceUnavailable' error) — the account name doesn't depend on
           location, so it's safe to retry here with a different value.
         required: false
+      blogAuthorPrincipalId:
+        description: >
+          Your own AAD object ID, to grant yourself Data Explorer read/write
+          access (Cosmos DB Built-in Data Contributor) — get it via
+          `az ad signed-in-user show --query id -o tsv`. Leave blank to skip;
+          re-run later with this filled in without affecting anything else.
+        required: false
 
 jobs:
   deploy:
@@ -53,6 +60,7 @@ jobs:
         shell: bash
         env:
           LOCATION: ${{ inputs.location }}
+          AUTHOR_PRINCIPAL_ID: ${{ inputs.blogAuthorPrincipalId }}
         run: |
           set -euo pipefail
 
@@ -60,6 +68,10 @@ jobs:
           if [ -n "$LOCATION" ]; then
             echo "Overriding Cosmos DB account location: $LOCATION"
             params+=(location="$LOCATION")
+          fi
+          if [ -n "$AUTHOR_PRINCIPAL_ID" ]; then
+            echo "Granting Data Contributor to author principal: $AUTHOR_PRINCIPAL_ID"
+            params+=(blogAuthorPrincipalId="$AUTHOR_PRINCIPAL_ID")
           fi
 
           az deployment group create \

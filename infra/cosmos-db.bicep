@@ -19,6 +19,9 @@ param throughput int = 1000
 @description('Principal object ID of the blog service managed identity')
 param blogServicePrincipalId string
 
+@description('Principal object ID of a human author who should get Data Explorer read/write access (Cosmos DB Built-in Data Contributor). Optional — leave blank to skip.')
+param blogAuthorPrincipalId string = ''
+
 resource account 'Microsoft.DocumentDB/databaseAccounts@2023-11-15' = {
   name: toLower(accountName)
   location: location
@@ -91,6 +94,19 @@ resource cosmosReaderRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRo
   properties: {
     roleDefinitionId: resourceId('Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions', account.name, '00000000-0000-0000-0000-000000000001')
     principalId: blogServicePrincipalId
+    scope: account.id
+  }
+}
+
+// Grants a human author (not the app) Data Explorer read/write, since
+// articles are authored by hand directly in Cosmos, never through the API.
+// Skipped entirely when blogAuthorPrincipalId is left blank.
+resource cosmosAuthorRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(blogAuthorPrincipalId)) {
+  parent: account
+  name: guid(account.id, blogAuthorPrincipalId, 'Cosmos DB Built-in Data Contributor')
+  properties: {
+    roleDefinitionId: resourceId('Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions', account.name, '00000000-0000-0000-0000-000000000002')
+    principalId: blogAuthorPrincipalId
     scope: account.id
   }
 }
