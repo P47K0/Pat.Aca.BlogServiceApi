@@ -5,7 +5,7 @@ export const Layout: FC<PropsWithChildren<{ title: string }>> = ({ title, childr
     <head>
       <meta charSet="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>{title} · koorevaar.com blog</title>
+      <title>koorevaar.com · Blog</title>
       {/* Same favicon as koorevaar.com's other pages (e.g. /contact), for a
           consistent brand identity across the whole domain. */}
       <link
@@ -22,7 +22,7 @@ export const Layout: FC<PropsWithChildren<{ title: string }>> = ({ title, childr
       <header class="border-b border-gray-200 px-6 py-4">
         <div class="mx-auto flex max-w-2xl items-center justify-between">
           <a href="/" class="text-xl font-semibold transition hover:text-blue-600">
-            koorevaar.com blog
+            Blog
           </a>
           {/* Same button/copy/icon as the koorevaar.com contact page's Home
               link, back to the main site (not this blog's own "/"). */}
