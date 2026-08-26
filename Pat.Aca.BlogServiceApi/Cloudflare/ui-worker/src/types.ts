@@ -17,6 +17,9 @@ export interface Article {
   content: string;
   publishedAt: string;
   tags: string[];
+  /** Incremented server-side by the API on every GET of this article's
+   * detail page — see ArticleDetailPage for where it's shown. */
+  viewCount: number;
 }
 
 /** Thrown when api-proxy returns a non-2xx/404 status or the fetch itself

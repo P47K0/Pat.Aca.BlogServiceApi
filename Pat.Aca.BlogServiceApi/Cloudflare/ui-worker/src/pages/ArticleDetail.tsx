@@ -7,7 +7,11 @@ export const ArticleDetailPage: FC<{ article: Article }> = ({ article }) => (
   <>
     <article class="rounded-2xl bg-white p-8 shadow-sm">
       <h1 class="text-3xl font-bold text-gray-900">{article.title}</h1>
-      <p class="mt-2 text-sm text-gray-500">{formatDate(article.publishedAt)}</p>
+      <p class="mt-2 text-sm text-gray-500">
+        {formatDate(article.publishedAt)}
+        {' · '}
+        {article.viewCount} {article.viewCount === 1 ? 'view' : 'views'}
+      </p>
       {article.tags.length > 0 && (
         <div class="mt-3">
           <TagList tags={article.tags} />

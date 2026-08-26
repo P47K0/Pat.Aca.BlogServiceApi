@@ -37,6 +37,7 @@ interface Article {
   content: string;
   publishedAt: string;
   tags: string[];
+  viewCount: number;
 }
 
 function renderArticleContent(article: Article): Article {

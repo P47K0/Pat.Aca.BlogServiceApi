@@ -179,7 +179,7 @@ app.MapGet("/articles", async (IArticleRepository articleRepository) =>
     .RequireRateLimiting(ArticlesRateLimiterPolicy)
     .AddEndpointFilter(RequireApiKey);
 
-app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleRepository articleRepository) =>
+app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleRepository articleRepository, ILogger<Program> logger) =>
 {
     if (string.IsNullOrEmpty(slug))
     {
@@ -187,9 +187,24 @@ app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleReposit
     }
 
     var article = await articleRepository.GetArticleBySlugAsync(slug);
-    return article is null
-        ? Results.Problem("Article not found", statusCode: StatusCodes.Status404NotFound)
-        : Results.Json(article);
+    if (article is null)
+    {
+        return Results.Problem("Article not found", statusCode: StatusCodes.Status404NotFound);
+    }
+
+    // View counting is best-effort: a failure here shouldn't turn an
+    // otherwise-successful article fetch into an error for the reader.
+    Article? withView = null;
+    try
+    {
+        withView = await articleRepository.IncrementViewCountAsync(slug);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Failed to increment view count for article {Slug}.", slug);
+    }
+
+    return Results.Json(withView ?? article);
 })
     .RequireRateLimiting(ArticlesRateLimiterPolicy)
     .AddEndpointFilter(RequireApiKey);

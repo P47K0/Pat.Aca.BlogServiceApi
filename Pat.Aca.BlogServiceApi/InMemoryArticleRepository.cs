@@ -17,5 +17,18 @@ namespace Pat.Aca.BlogServiceApi
 
         public Task<Article?> GetArticleBySlugAsync(string slug) =>
             Task.FromResult(SeedArticles.FirstOrDefault(a => a.Slug == slug && a.PublishedAt <= DateTime.UtcNow));
+
+        public Task<Article?> IncrementViewCountAsync(string slug)
+        {
+            var index = SeedArticles.FindIndex(a => a.Slug == slug && a.PublishedAt <= DateTime.UtcNow);
+            if (index < 0)
+            {
+                return Task.FromResult<Article?>(null);
+            }
+
+            var updated = SeedArticles[index] with { ViewCount = SeedArticles[index].ViewCount + 1 };
+            SeedArticles[index] = updated;
+            return Task.FromResult<Article?>(updated);
+        }
     }
 }
