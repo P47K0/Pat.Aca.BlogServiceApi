@@ -29,6 +29,13 @@ namespace Pat.Aca.BlogServiceApi
             _databaseId = settings.Database;
             _containerId = settings.Container;
 
+            // NOTE: do not set a blanket CosmosSerializationOptions.PropertyNamingPolicy
+            // here. Article.Id is confirmed stored as "Id" (PascalCase) — it's the
+            // user's own custom field, distinct from Cosmos's mandatory system "id"
+            // (which every document also has, separately, auto-generated). A blanket
+            // CamelCase policy would make Id try to bind from that system "id" GUID
+            // instead, breaking every read. See IncrementViewCountAsync for how the
+            // view-count write targets the real system id without touching this.
             var clientOptions = new CosmosClientOptions();
 
             if (!string.IsNullOrEmpty(settings.PrimaryKey))
@@ -128,6 +135,52 @@ namespace Pat.Aca.BlogServiceApi
             }
 
             return articles;
+        }
+
+        public async Task<Article?> IncrementViewCountAsync(string slug)
+        {
+            // Cosmos's own system "id" — mandatory on every document, always a
+            // lowercase string — is the one property name Cosmos itself
+            // guarantees, unlike Article.Id (confirmed stored as "Id": the
+            // user's own custom field, a completely different value) or any of
+            // Article's other properties (their real casing was never verified
+            // by a case-sensitive query, only ever read via case-insensitive
+            // POCO binding). Look it up narrowly instead of guessing.
+            // Same future-publishedAt exclusion as GetArticleBySlugAsync.
+            var idQuery = new QueryDefinition(
+                "SELECT VALUE c.id FROM c WHERE c.slug = @slug AND c.publishedAt <= @now")
+                .WithParameter("@slug", slug)
+                .WithParameter("@now", DateTime.UtcNow);
+
+            string? cosmosId = null;
+            using (FeedIterator<string> idIterator = _container.GetItemQueryIterator<string>(idQuery))
+            {
+                while (idIterator.HasMoreResults && cosmosId is null)
+                {
+                    FeedResponse<string> idResponse = await idIterator.ReadNextAsync();
+                    cosmosId = idResponse.Resource.FirstOrDefault();
+                }
+            }
+
+            if (cosmosId is null)
+            {
+                return null;
+            }
+
+            // A targeted Patch, not a read-modify-write/Upsert of the whole
+            // article: avoids needing to know or match the real casing of any
+            // property but "/viewCount", which is new and freely named here.
+            // Increment creates the field (starting from the given value) if
+            // it doesn't exist yet — confirmed via Cosmos's Patch API docs —
+            // so this is safe on an article that's never been viewed before.
+            // Also atomic, unlike a read-modify-write: concurrent views can't
+            // lose an update.
+            ItemResponse<Article> response = await _container.PatchItemAsync<Article>(
+                cosmosId,
+                new PartitionKey(slug),
+                new[] { PatchOperation.Increment("/viewCount", 1) });
+
+            return response.Resource;
         }
 
         public async Task<List<ArticleSummary>> GetRecentArticlesAsync(int count = 5)
