@@ -1,0 +1,24 @@
+name = "blog-ui-worker"
+main = "src/index.tsx"
+compatibility_date = "2026-08-26"
+
+# Custom domain — unlike api-proxy (which stays on *.workers.dev, since
+# nothing calls it from a browser address bar), this Worker IS user-facing,
+# so it's attached to a subdomain of the linked koorevaar.com zone. Requires
+# koorevaar.com to already be added as a zone in this Cloudflare account.
+routes = [
+  { pattern = "blog.koorevaar.com", custom_domain = true }
+]
+
+# Base URL of the api-proxy Worker (blog-service-worker) — it already attaches
+# the shared API key and renders article Markdown to HTML server-side, so this
+# Worker never needs an API key of its own. Plain `[vars]` entry, not a
+# secret, same idea as API_BASE_URL in api-proxy's wrangler.toml.
+#
+# TODO: replace <your-subdomain> with this account's actual *.workers.dev
+# subdomain (Cloudflare dashboard → Workers & Pages → Overview, shown at the
+# top as "yourname.workers.dev") once api-proxy has been deployed at least
+# once. If api-proxy is later given its own custom domain instead, point this
+# at that domain rather than *.workers.dev.
+[vars]
+API_PROXY_BASE_URL = "https://blog-service-worker.<your-subdomain>.workers.dev"
