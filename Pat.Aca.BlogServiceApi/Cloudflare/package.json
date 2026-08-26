@@ -1,0 +1,19 @@
+{
+  "name": "blog-service-worker",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cloudflare Worker proxy in front of Pat.Aca.BlogServiceApi: attaches the shared API key and renders article Markdown to HTML server-side before responding to the frontend.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260825.1",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.4.0"
+  },
+  "dependencies": {
+    "marked": "^15.0.6"
+  }
+}

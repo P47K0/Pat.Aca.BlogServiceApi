@@ -1,0 +1,15 @@
+name = "blog-service-worker"
+main = "src/index.ts"
+compatibility_date = "2026-08-25"
+
+# No custom domain route — this Worker is a server-side proxy, never linked to
+# directly by end users, so the default *.workers.dev subdomain is enough. Add
+# a `routes = [...]` entry here later if it ever needs to sit under
+# koorevaar.com (e.g. api.koorevaar.com).
+
+# Non-secret config: the origin API's base URL. Plain `[vars]`, not a secret —
+# it's not sensitive, same idea as an appsettings.json value in the API repo.
+# The API key IS a secret and must never go here — set it with:
+#   wrangler secret put ARTICLES_API_KEY
+[vars]
+API_BASE_URL = "https://blog-service-api.whitewater-2e220d9b.westeurope.azurecontainerapps.io"
