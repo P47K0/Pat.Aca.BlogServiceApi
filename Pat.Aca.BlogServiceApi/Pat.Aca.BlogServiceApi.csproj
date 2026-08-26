@@ -21,8 +21,4 @@
     <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.2.3" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Cloudflare\" />
-  </ItemGroup>
-
 </Project>
