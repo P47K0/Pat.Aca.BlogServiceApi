@@ -10,15 +10,20 @@ routes = [
   { pattern = "blog.koorevaar.com", custom_domain = true }
 ]
 
-# Base URL of the api-proxy Worker (blog-service-worker) — it already attaches
-# the shared API key and renders article Markdown to HTML server-side, so this
-# Worker never needs an API key of its own. Plain `[vars]` entry, not a
-# secret, same idea as API_BASE_URL in api-proxy's wrangler.toml.
+# Base URL of the api-proxy Worker — it already attaches the shared API key
+# and renders article Markdown to HTML server-side, so this Worker never
+# needs an API key of its own. Plain `[vars]` entry, not a secret, same idea
+# as API_BASE_URL in api-proxy's wrangler.toml.
 #
-# TODO: replace <your-subdomain> with this account's actual *.workers.dev
-# subdomain (Cloudflare dashboard → Workers & Pages → Overview, shown at the
-# top as "yourname.workers.dev") once api-proxy has been deployed at least
-# once. If api-proxy is later given its own custom domain instead, point this
-# at that domain rather than *.workers.dev.
+# Deployed as "blog-api-proxy" — note this doesn't match the `name` in
+# api-proxy/wrangler.toml ("blog-service-worker"), so it was likely renamed
+# by hand at some point after that file was last committed.
 [vars]
-API_PROXY_BASE_URL = "https://blog-service-worker.<your-subdomain>.workers.dev"
+API_PROXY_BASE_URL = "https://blog-api-proxy.pkoorevaar.workers.dev"
+
+# Persists console.log/console.error output so the dashboard's Logs tab shows
+# past requests, not just a live stream started after the fact — without
+# this, `wrangler tail` (or the dashboard's "Begin log stream") only ever
+# shows what happens after you start watching.
+[observability]
+enabled = true
