@@ -12,10 +12,15 @@ export interface Env {
 // Must match Pat.Aca.BlogServiceApi's ApiSecurity.ApiKeyHeaderName exactly.
 const API_KEY_HEADER = 'X-Api-Key';
 
-// No frontend exists yet, so nothing to restrict to — tighten this to
-// koorevaar.com once the frontend is built and calling this Worker.
+// ui-worker is the intended frontend, so this is scoped to its custom domain.
+// Note this is NOT access control — CORS only governs whether a *browser*
+// may read a cross-origin response; it does nothing against curl, another
+// Worker's fetch(), or any other non-browser caller (and ui-worker's own
+// calls to this Worker are server-side, so CORS doesn't even apply to them).
+// Real restriction to ui-worker only — a shared-secret header or a Service
+// Binding — is deliberately deferred, not implemented here yet.
 const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': 'https://blog.koorevaar.com',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
