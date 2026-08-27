@@ -159,5 +159,33 @@ namespace Pat.ACA.BlogServiceTests
 
             Assert.Null(article);
         }
+
+        [Fact]
+        public async Task InMemoryArticleRepository_IncrementViewCountAsync_increments_and_persists()
+        {
+            var repository = new InMemoryArticleRepository();
+            var before = await repository.GetArticleBySlugAsync("first-article");
+
+            var afterFirstView = await repository.IncrementViewCountAsync("first-article");
+            var afterSecondView = await repository.IncrementViewCountAsync("first-article");
+
+            Assert.NotNull(before);
+            Assert.NotNull(afterFirstView);
+            Assert.NotNull(afterSecondView);
+            Assert.Equal(before!.ViewCount + 1, afterFirstView!.ViewCount);
+            Assert.Equal(before.ViewCount + 2, afterSecondView!.ViewCount);
+            // Persisted, not just returned — a fresh read sees the same count.
+            Assert.Equal(afterSecondView.ViewCount, (await repository.GetArticleBySlugAsync("first-article"))!.ViewCount);
+        }
+
+        [Fact]
+        public async Task InMemoryArticleRepository_IncrementViewCountAsync_returns_null_for_unknown_slug()
+        {
+            var repository = new InMemoryArticleRepository();
+
+            var result = await repository.IncrementViewCountAsync("does-not-exist");
+
+            Assert.Null(result);
+        }
     }
 }

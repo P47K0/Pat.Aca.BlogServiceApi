@@ -98,6 +98,43 @@ resource cosmosReaderRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRo
   }
 }
 
+// Custom role, additive to cosmosReaderRoleAssignment above: grants only the
+// one write action the app actually performs (a Patch — which Cosmos's RBAC
+// model treats as a "replace" data action, per the OperationType in the
+// error this closes: "does not have the required RBAC permissions to
+// perform action [.../items/replace]"). Deliberately not the built-in Data
+// Contributor role (create/upsert/delete too) — the API only ever increments
+// a view count, never creates or deletes articles; those stay human-only via
+// cosmosAuthorRoleAssignment below.
+resource cosmosBlogServiceWriterRoleDefinition 'Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions@2024-05-15' = {
+  parent: account
+  name: guid(account.id, 'BlogServiceApi view-count writer role')
+  properties: {
+    roleName: 'BlogServiceApi View-Count Writer'
+    type: 'CustomRole'
+    assignableScopes: [
+      account.id
+    ]
+    permissions: [
+      {
+        dataActions: [
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/replace'
+        ]
+      }
+    ]
+  }
+}
+
+resource cosmosBlogServiceWriterRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
+  parent: account
+  name: guid(account.id, blogServicePrincipalId, 'BlogServiceApi view-count writer role')
+  properties: {
+    roleDefinitionId: cosmosBlogServiceWriterRoleDefinition.id
+    principalId: blogServicePrincipalId
+    scope: account.id
+  }
+}
+
 // Grants a human author (not the app) Data Explorer read/write, since
 // articles are authored by hand directly in Cosmos, never through the API.
 // Skipped entirely when blogAuthorPrincipalId is left blank.

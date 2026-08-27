@@ -98,6 +98,17 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task GET_articles_slug_increments_view_count_on_each_request()
+        {
+            var first = await (await _client.GetAsync("/articles/second-article")).Content.ReadFromJsonAsync<Article>();
+            var second = await (await _client.GetAsync("/articles/second-article")).Content.ReadFromJsonAsync<Article>();
+
+            Assert.NotNull(first);
+            Assert.NotNull(second);
+            Assert.Equal(first!.ViewCount + 1, second!.ViewCount);
+        }
+
+        [Fact]
         public async Task GET_articles_slug_returns_404_problem_details_for_invalid_slug()
         {
             using var response = await _client.GetAsync("/articles/nonexistent-slug");
@@ -138,5 +149,5 @@ namespace Pat.ACA.BlogServiceTests
         }
     }
 
-    public record Article(int Id, string Slug, string Title, string Summary, string Content, DateTime PublishedAt, List<string> Tags);
+    public record Article(int Id, string Slug, string Title, string Summary, string Content, DateTime PublishedAt, List<string> Tags, int ViewCount = 0);
 }
