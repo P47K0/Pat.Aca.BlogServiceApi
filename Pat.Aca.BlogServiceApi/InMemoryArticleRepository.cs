@@ -30,5 +30,43 @@ namespace Pat.Aca.BlogServiceApi
             SeedArticles[index] = updated;
             return Task.FromResult<Article?>(updated);
         }
+
+        public Task<Article?> CreateArticleAsync(ArticleWriteRequest request)
+        {
+            // No publishedAt filter — a draft/future-dated slug still reserves
+            // the name, mirroring CosmosArticleRepository.
+            if (SeedArticles.Any(a => a.Slug == request.Slug))
+            {
+                return Task.FromResult<Article?>(null);
+            }
+
+            // Id dropped from the write path per the BRD (legacy, never used
+            // for lookups) — new articles just get 0.
+            var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>());
+            SeedArticles.Add(article);
+            return Task.FromResult<Article?>(article);
+        }
+
+        public Task<Article?> UpdateArticleAsync(string slug, ArticleWriteRequest request)
+        {
+            var index = SeedArticles.FindIndex(a => a.Slug == slug);
+            if (index < 0)
+            {
+                return Task.FromResult<Article?>(null);
+            }
+
+            // ViewCount (and Id) deliberately untouched — full-replace from the
+            // client's perspective, but these two stay server-owned.
+            var updated = SeedArticles[index] with
+            {
+                Title = request.Title,
+                Summary = request.Summary ?? "",
+                Content = request.Content,
+                PublishedAt = request.PublishedAt,
+                Tags = request.Tags ?? new List<string>()
+            };
+            SeedArticles[index] = updated;
+            return Task.FromResult<Article?>(updated);
+        }
     }
 }

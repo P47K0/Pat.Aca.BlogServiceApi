@@ -48,6 +48,24 @@ namespace Pat.Aca.BlogServiceApi
                 : $"ip:{httpContext.Connection.RemoteIpAddress}";
 
         /// <summary>
+        /// Partitions the write endpoints' rate limit by the caller's Azure AD
+        /// app-only identity ("oid" — the calling service principal's object id
+        /// on a client-credentials token) instead of API key, since writes never
+        /// go through the Cloudflare Worker's shared key. Falls back to client
+        /// IP if that claim is somehow missing, same defensive fallback as the
+        /// read path's key-based partitioning above.
+        /// </summary>
+        public static string GetWriteRateLimitPartitionKey(HttpContext httpContext)
+        {
+            var callerId = httpContext.User.FindFirst("oid")?.Value
+                ?? httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            return !string.IsNullOrEmpty(callerId)
+                ? $"aad:{callerId}"
+                : $"ip:{httpContext.Connection.RemoteIpAddress}";
+        }
+
+        /// <summary>
         /// Builds the fixed-window options for the articles rate-limit policy.
         /// Parameterized so tests can exercise the exact same construction path
         /// with a small limit instead of waiting on the real one.

@@ -102,6 +102,31 @@ namespace Pat.ACA.BlogServiceTests
             Assert.Equal("ip:203.0.113.5", partitionKey);
         }
 
+        // --- ApiSecurity.GetWriteRateLimitPartitionKey ---
+
+        [Fact]
+        public void GetWriteRateLimitPartitionKey_uses_oid_claim_when_present()
+        {
+            var httpContext = new DefaultHttpContext();
+            var identity = new System.Security.Claims.ClaimsIdentity(new[] { new System.Security.Claims.Claim("oid", "caller-object-id") });
+            httpContext.User = new System.Security.Claims.ClaimsPrincipal(identity);
+
+            var partitionKey = ApiSecurity.GetWriteRateLimitPartitionKey(httpContext);
+
+            Assert.Equal("aad:caller-object-id", partitionKey);
+        }
+
+        [Fact]
+        public void GetWriteRateLimitPartitionKey_falls_back_to_ip_when_no_claims()
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.5");
+
+            var partitionKey = ApiSecurity.GetWriteRateLimitPartitionKey(httpContext);
+
+            Assert.Equal("ip:203.0.113.5", partitionKey);
+        }
+
         // --- ApiSecurity.CreateArticlesLimiterOptions ---
         // Same construction path as production, but a tiny limit and a long
         // window, so this proves the "reject beyond the limit" behavior in
@@ -186,6 +211,86 @@ namespace Pat.ACA.BlogServiceTests
             var result = await repository.IncrementViewCountAsync("does-not-exist");
 
             Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task InMemoryArticleRepository_CreateArticleAsync_creates_and_is_then_readable()
+        {
+            var repository = new InMemoryArticleRepository();
+            var request = new ArticleWriteRequest("new-slug", "New Title", "New content.", "New summary.", DateTime.UtcNow.AddDays(-1), new List<string> { "tag" });
+
+            var created = await repository.CreateArticleAsync(request);
+
+            Assert.NotNull(created);
+            Assert.Equal("new-slug", created!.Slug);
+            Assert.Equal(0, created.ViewCount);
+            Assert.Equal("new-slug", (await repository.GetArticleBySlugAsync("new-slug"))!.Slug);
+        }
+
+        [Fact]
+        public async Task InMemoryArticleRepository_CreateArticleAsync_returns_null_for_duplicate_slug()
+        {
+            var repository = new InMemoryArticleRepository();
+            var request = new ArticleWriteRequest("first-article", "Title", "Content.");
+
+            var result = await repository.CreateArticleAsync(request);
+
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task InMemoryArticleRepository_UpdateArticleAsync_replaces_fields_and_preserves_view_count()
+        {
+            // SeedArticles is static, shared across every InMemoryArticleRepository
+            // instance in the test process — read the current count rather than
+            // assuming an absolute value, same reasoning as
+            // InMemoryArticleRepository_IncrementViewCountAsync_increments_and_persists
+            // above, which asserts deltas for the same reason.
+            var repository = new InMemoryArticleRepository();
+            var before = (await repository.GetArticleBySlugAsync("first-article"))!.ViewCount;
+            var request = new ArticleWriteRequest("first-article", "Updated Title", "Updated content.", "Updated summary.", DateTime.UtcNow.AddDays(-1), new List<string> { "updated-tag" });
+
+            var updated = await repository.UpdateArticleAsync("first-article", request);
+
+            Assert.NotNull(updated);
+            Assert.Equal("Updated Title", updated!.Title);
+            Assert.Equal(before, updated.ViewCount); // preserved, not reset by the write
+        }
+
+        [Fact]
+        public async Task InMemoryArticleRepository_UpdateArticleAsync_returns_null_for_unknown_slug()
+        {
+            var repository = new InMemoryArticleRepository();
+            var request = new ArticleWriteRequest("does-not-exist", "Title", "Content.");
+
+            var result = await repository.UpdateArticleAsync("does-not-exist", request);
+
+            Assert.Null(result);
+        }
+
+        // --- ArticleWriteValidation ---
+
+        [Fact]
+        public void ArticleWriteValidation_passes_for_a_fully_populated_request()
+        {
+            var request = new ArticleWriteRequest("slug", "Title", "Content.");
+
+            var errors = ArticleWriteValidation.Validate(request);
+
+            Assert.Empty(errors);
+        }
+
+        [Theory]
+        [InlineData("", "Title", "Content.")]
+        [InlineData("slug", "", "Content.")]
+        [InlineData("slug", "Title", "")]
+        public void ArticleWriteValidation_fails_when_a_required_field_is_missing(string slug, string title, string content)
+        {
+            var request = new ArticleWriteRequest(slug, title, content);
+
+            var errors = ArticleWriteValidation.Validate(request);
+
+            Assert.NotEmpty(errors);
         }
     }
 }
