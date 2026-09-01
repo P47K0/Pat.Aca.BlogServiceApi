@@ -103,15 +103,24 @@ namespace Pat.Aca.BlogServiceApi
                 .WithParameter("@slug", slug)
                 .WithParameter("@now", DateTime.UtcNow);
 
-            using FeedIterator<Article> iterator = _container.GetItemQueryIterator<Article>(query);
+            // Deserializes into ArticleDocument, not the public Article record
+            // directly — see the type's own doc comment below. Article.Id is a
+            // required constructor parameter with no default; a document
+            // written by CreateArticleAsync/UpdateArticleAsync has no "Id"
+            // field at all (dropped from the write path), which Cosmos's
+            // Newtonsoft-based deserializer throws on rather than defaulting —
+            // confirmed in production: one write-path article made every read
+            // of the whole collection 500. ArticleDocument's plain
+            // property-setter deserialization has no such requirement.
+            using FeedIterator<ArticleDocument> iterator = _container.GetItemQueryIterator<ArticleDocument>(query);
 
             while (iterator.HasMoreResults)
             {
-                FeedResponse<Article> response = await iterator.ReadNextAsync();
-                Article? article = response.Resource.FirstOrDefault();
-                if (article is not null)
+                FeedResponse<ArticleDocument> response = await iterator.ReadNextAsync();
+                ArticleDocument? document = response.Resource.FirstOrDefault();
+                if (document is not null)
                 {
-                    return article;
+                    return ToArticle(document);
                 }
             }
 
@@ -126,13 +135,16 @@ namespace Pat.Aca.BlogServiceApi
                 "SELECT * FROM c WHERE c.publishedAt <= @now ORDER BY c.publishedAt DESC")
                 .WithParameter("@now", DateTime.UtcNow);
 
-            using FeedIterator<Article> iterator = _container.GetItemQueryIterator<Article>(query);
+            // See the comment in GetArticleBySlugAsync above — deserializing
+            // into ArticleDocument instead of Article directly is required so
+            // a write-path article (no "Id" field) doesn't 500 the whole list.
+            using FeedIterator<ArticleDocument> iterator = _container.GetItemQueryIterator<ArticleDocument>(query);
             List<Article> articles = new();
 
             while (iterator.HasMoreResults)
             {
-                FeedResponse<Article> response = await iterator.ReadNextAsync();
-                articles.AddRange(response.Resource);
+                FeedResponse<ArticleDocument> response = await iterator.ReadNextAsync();
+                articles.AddRange(response.Resource.Select(ToArticle));
             }
 
             return articles;
@@ -175,13 +187,16 @@ namespace Pat.Aca.BlogServiceApi
             // it doesn't exist yet — confirmed via Cosmos's Patch API docs —
             // so this is safe on an article that's never been viewed before.
             // Also atomic, unlike a read-modify-write: concurrent views can't
-            // lose an update.
-            ItemResponse<Article> response = await _container.PatchItemAsync<Article>(
+            // lose an update. Deserializes the patched document into
+            // ArticleDocument, not Article directly — see the comment in
+            // GetArticleBySlugAsync above; a write-path article has no "Id"
+            // field, which breaks Article's constructor-based deserialization.
+            ItemResponse<ArticleDocument> response = await _container.PatchItemAsync<ArticleDocument>(
                 cosmosId,
                 new PartitionKey(slug),
                 new[] { PatchOperation.Increment("/viewCount", 1) });
 
-            return response.Resource;
+            return ToArticle(response.Resource);
         }
 
         /// <summary>
@@ -282,19 +297,28 @@ namespace Pat.Aca.BlogServiceApi
             new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount);
 
         /// <summary>
-        /// The exact JSON shape written to/read from Cosmos by the write
-        /// methods above. Deliberately separate from the public Article
-        /// record: Cosmos's default serializer (Newtonsoft, no naming policy —
-        /// see the comment on CosmosClientOptions in the constructor) would
-        /// otherwise write PascalCase property names straight from Article's
-        /// C# member names, which would silently break every future read —
-        /// GetArticlesAsync/GetArticleBySlugAsync's WHERE clauses require
-        /// "slug" and "publishedAt" specifically lowercase (confirmed via
-        /// production data), and the view-count Patch above already targets
-        /// "/viewCount" lowercase camelCase. This type pins every field this
-        /// class writes to that same lowercase-camelCase convention
-        /// explicitly. The legacy "Id" field is deliberately not included —
-        /// dropped from the write path per the BRD.
+        /// The exact JSON shape written to/read from Cosmos by every method in
+        /// this class, on both the write and read side. Deliberately separate
+        /// from the public Article record for two reasons: (1) Cosmos's
+        /// default serializer (Newtonsoft, no naming policy — see the comment
+        /// on CosmosClientOptions in the constructor) would otherwise write
+        /// PascalCase property names straight from Article's C# member names
+        /// on writes, which would silently break the slug/publishedAt WHERE
+        /// clauses (confirmed lowercase via production data) and the
+        /// view-count Patch (already lowercase camelCase). (2) Article.Id is a
+        /// required constructor parameter with no default — a document
+        /// written by CreateArticleAsync/UpdateArticleAsync has no "Id" field
+        /// at all (dropped from the write path per the BRD), and Cosmos's
+        /// constructor-based deserialization into Article throws rather than
+        /// defaulting when a required parameter has no matching JSON property
+        /// — confirmed in production: one write-path article made every read
+        /// of the whole collection 500 until the read methods were switched
+        /// to deserialize into this type (plain property-setter
+        /// deserialization, no such requirement) instead. The legacy "Id"
+        /// field is deliberately not mapped here at all — existing
+        /// hand-authored articles keep their old (PascalCase-stored) Id value
+        /// untouched in Cosmos; it's simply never read by this class, and
+        /// ToArticle always returns 0 for it.
         /// </summary>
         private sealed class ArticleDocument
         {
