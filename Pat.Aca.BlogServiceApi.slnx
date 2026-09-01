@@ -3,6 +3,7 @@
     <File Path=".github/workflows/cosmos-db.bicep" />
     <File Path=".github/workflows/cosmos-db.yml" />
     <File Path=".github/workflows/deploy-app.yml" />
+    <File Path="README.md" />
   </Folder>
   <Project Path="Pat.Aca.BlogServiceApi/Pat.Aca.BlogServiceApi.csproj" />
   <Project Path="Pat.ACA.BlogServiceTests/Pat.ACA.BlogServiceApiTests.csproj" />
