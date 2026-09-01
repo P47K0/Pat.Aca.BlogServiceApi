@@ -4,7 +4,7 @@ The whole blog feature for my personal site: backend API, frontend Workers, and 
 
 ## What's in this repo
 
-| Path | What |
+| Path | Description |
 |---|---|
 | `Pat.Aca.BlogServiceApi/` | .NET 10 minimal API — reads/writes articles in Cosmos DB |
 | `Pat.Aca.BlogServiceApi/Cloudflare/api-proxy/` | Cloudflare Worker: proxies reads to the API, renders Markdown → HTML |
@@ -45,7 +45,3 @@ dotnet test
 | `POST /articles`, `PUT /articles/{slug}` | Azure AD bearer token (`Articles.Write` app role) |
 
 Reads are for the Cloudflare Workers serving the public site. Writes are used by Claude Code, on request, to create and update articles.
-
-## More detail
-
-Full requirements and architecture decisions live in the [BRD](https://claude.ai/code/artifact/7c5bdf49-6ff8-4a45-b0a4-3e9236b7aed8).
