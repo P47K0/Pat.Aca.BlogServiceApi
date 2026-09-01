@@ -33,4 +33,38 @@ public sealed class FakeArticleRepository : IArticleRepository
         SeedArticles[index] = updated;
         return Task.FromResult<Article?>(updated);
     }
+
+    public Task<Article?> CreateArticleAsync(ArticleWriteRequest request)
+    {
+        // No publishedAt filter — a draft/future-dated slug still reserves
+        // the name, mirroring CosmosArticleRepository/InMemoryArticleRepository.
+        if (SeedArticles.Any(a => a.Slug == request.Slug))
+        {
+            return Task.FromResult<Article?>(null);
+        }
+
+        var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>());
+        SeedArticles.Add(article);
+        return Task.FromResult<Article?>(article);
+    }
+
+    public Task<Article?> UpdateArticleAsync(string slug, ArticleWriteRequest request)
+    {
+        var index = SeedArticles.FindIndex(a => a.Slug == slug);
+        if (index < 0)
+        {
+            return Task.FromResult<Article?>(null);
+        }
+
+        var updated = SeedArticles[index] with
+        {
+            Title = request.Title,
+            Summary = request.Summary ?? "",
+            Content = request.Content,
+            PublishedAt = request.PublishedAt,
+            Tags = request.Tags ?? new List<string>()
+        };
+        SeedArticles[index] = updated;
+        return Task.FromResult<Article?>(updated);
+    }
 }

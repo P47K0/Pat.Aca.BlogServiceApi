@@ -99,18 +99,21 @@ resource cosmosReaderRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRo
 }
 
 // Custom role, additive to cosmosReaderRoleAssignment above: grants only the
-// one write action the app actually performs (a Patch — which Cosmos's RBAC
-// model treats as a "replace" data action, per the OperationType in the
-// error this closes: "does not have the required RBAC permissions to
-// perform action [.../items/replace]"). Deliberately not the built-in Data
-// Contributor role (create/upsert/delete too) — the API only ever increments
-// a view count, never creates or deletes articles; those stay human-only via
-// cosmosAuthorRoleAssignment below.
+// write actions the app actually performs, not the built-in Data
+// Contributor role (which also grants upsert/delete the app never uses).
+// Originally just "replace" (a Patch — which Cosmos's RBAC model treats as a
+// "replace" data action, per the OperationType in the error this closed:
+// "does not have the required RBAC permissions to perform action
+// [.../items/replace]"), for the view-count increment. "create" added once
+// POST /articles (the write API) started calling CreateItemAsync — still no
+// delete: that stays human-only via cosmosAuthorRoleAssignment below, per
+// the BRD's phased write-API scope (create+update now, delete later once a
+// website UI can split that role out).
 resource cosmosBlogServiceWriterRoleDefinition 'Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions@2024-05-15' = {
   parent: account
   name: guid(account.id, 'BlogServiceApi view-count writer role')
   properties: {
-    roleName: 'BlogServiceApi View-Count Writer'
+    roleName: 'BlogServiceApi Writer'
     type: 'CustomRole'
     assignableScopes: [
       account.id
@@ -119,6 +122,7 @@ resource cosmosBlogServiceWriterRoleDefinition 'Microsoft.DocumentDB/databaseAcc
       {
         dataActions: [
           'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/replace'
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/create'
         ]
       }
     ]

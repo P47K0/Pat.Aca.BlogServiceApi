@@ -2,6 +2,7 @@ using Azure.Core;
 using Azure.Identity;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
 
 namespace Pat.Aca.BlogServiceApi
 {
@@ -181,6 +182,145 @@ namespace Pat.Aca.BlogServiceApi
                 new[] { PatchOperation.Increment("/viewCount", 1) });
 
             return response.Resource;
+        }
+
+        /// <summary>
+        /// Looks up an article's real Cosmos system id by slug, with no
+        /// publishedAt filter — unlike GetArticleBySlugAsync/
+        /// IncrementViewCountAsync above, which deliberately hide future-dated
+        /// articles from readers/view-counting, the write path needs to find an
+        /// article regardless of publish state: an author must be able to see
+        /// and edit their own scheduled drafts. Returns null if no document has
+        /// this slug.
+        /// </summary>
+        private async Task<string?> FindCosmosIdBySlugAsync(string slug)
+        {
+            var query = new QueryDefinition("SELECT VALUE c.id FROM c WHERE c.slug = @slug")
+                .WithParameter("@slug", slug);
+
+            using FeedIterator<string> iterator = _container.GetItemQueryIterator<string>(query);
+            while (iterator.HasMoreResults)
+            {
+                FeedResponse<string> response = await iterator.ReadNextAsync();
+                var id = response.Resource.FirstOrDefault();
+                if (id is not null)
+                {
+                    return id;
+                }
+            }
+
+            return null;
+        }
+
+        public async Task<Article?> CreateArticleAsync(ArticleWriteRequest request)
+        {
+            // No publishedAt filter — a draft/future-dated slug still reserves
+            // the name. This existence check + the CreateItemAsync below aren't
+            // atomic together (a true concurrent double-POST of the same slug
+            // could theoretically slip both through) — an accepted simplicity
+            // trade-off at this blog's traffic/single-caller scale, same as the
+            // read-modify-write view-count implementation was before it got
+            // upgraded to Patch.
+            if (await FindCosmosIdBySlugAsync(request.Slug) is not null)
+            {
+                return null;
+            }
+
+            var document = new ArticleDocument
+            {
+                Id = Guid.NewGuid().ToString(),
+                Slug = request.Slug,
+                Title = request.Title,
+                Summary = request.Summary ?? "",
+                Content = request.Content,
+                PublishedAt = request.PublishedAt,
+                Tags = request.Tags ?? new List<string>(),
+                ViewCount = 0
+            };
+
+            ItemResponse<ArticleDocument> response = await _container.CreateItemAsync(document, new PartitionKey(document.Slug));
+
+            return ToArticle(response.Resource);
+        }
+
+        public async Task<Article?> UpdateArticleAsync(string slug, ArticleWriteRequest request)
+        {
+            var cosmosId = await FindCosmosIdBySlugAsync(slug);
+            if (cosmosId is null)
+            {
+                // Update-only, not upsert.
+                return null;
+            }
+
+            // A targeted Patch, not a full ReplaceItemAsync of the whole
+            // document — same reasoning as IncrementViewCountAsync above: this
+            // never has to read or preserve viewCount (or guess any other
+            // property's real casing on existing hand-authored documents),
+            // since it only ever touches the specific paths named here.
+            var patchOperations = new List<PatchOperation>
+            {
+                PatchOperation.Set("/title", request.Title),
+                PatchOperation.Set("/summary", request.Summary ?? ""),
+                PatchOperation.Set("/content", request.Content),
+                PatchOperation.Set("/publishedAt", request.PublishedAt),
+                PatchOperation.Set("/tags", request.Tags ?? new List<string>())
+            };
+
+            ItemResponse<ArticleDocument> response = await _container.PatchItemAsync<ArticleDocument>(
+                cosmosId,
+                new PartitionKey(slug),
+                patchOperations);
+
+            return ToArticle(response.Resource);
+        }
+
+        private static Article ToArticle(ArticleDocument document) =>
+            // Id is always 0 here — dropped from the write path per the BRD.
+            // Existing hand-authored articles keep their old (PascalCase-stored)
+            // Id value untouched; it's simply never read or written by this
+            // class's write methods.
+            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount);
+
+        /// <summary>
+        /// The exact JSON shape written to/read from Cosmos by the write
+        /// methods above. Deliberately separate from the public Article
+        /// record: Cosmos's default serializer (Newtonsoft, no naming policy —
+        /// see the comment on CosmosClientOptions in the constructor) would
+        /// otherwise write PascalCase property names straight from Article's
+        /// C# member names, which would silently break every future read —
+        /// GetArticlesAsync/GetArticleBySlugAsync's WHERE clauses require
+        /// "slug" and "publishedAt" specifically lowercase (confirmed via
+        /// production data), and the view-count Patch above already targets
+        /// "/viewCount" lowercase camelCase. This type pins every field this
+        /// class writes to that same lowercase-camelCase convention
+        /// explicitly. The legacy "Id" field is deliberately not included —
+        /// dropped from the write path per the BRD.
+        /// </summary>
+        private sealed class ArticleDocument
+        {
+            [JsonProperty("id")]
+            public string Id { get; set; } = "";
+
+            [JsonProperty("slug")]
+            public string Slug { get; set; } = "";
+
+            [JsonProperty("title")]
+            public string Title { get; set; } = "";
+
+            [JsonProperty("summary")]
+            public string Summary { get; set; } = "";
+
+            [JsonProperty("content")]
+            public string Content { get; set; } = "";
+
+            [JsonProperty("publishedAt")]
+            public DateTime PublishedAt { get; set; }
+
+            [JsonProperty("tags")]
+            public List<string> Tags { get; set; } = new();
+
+            [JsonProperty("viewCount")]
+            public int ViewCount { get; set; }
         }
 
         public async Task<List<ArticleSummary>> GetRecentArticlesAsync(int count = 5)

@@ -1,0 +1,18 @@
+namespace Pat.Aca.BlogServiceApi
+{
+    /// <summary>
+    /// Request body for POST/PUT /articles. Deliberately excludes Id (legacy
+    /// field dropped from the write path per the BRD — a hand-typed int never
+    /// used for lookups anywhere; slug is the real key) and ViewCount
+    /// (server-owned, only ever changed by GET /articles/{slug}'s increment,
+    /// never client-settable). Only Slug/Title/Content are enforced-required
+    /// by ArticleWriteValidation — Summary/PublishedAt/Tags are pass-through.
+    /// </summary>
+    public record ArticleWriteRequest(
+        string Slug,
+        string Title,
+        string Content,
+        string? Summary = null,
+        DateTime PublishedAt = default,
+        List<string>? Tags = null);
+}

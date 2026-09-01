@@ -14,7 +14,16 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
 
-builder.Services.AddAuthorization();
+const string ArticlesWriteAuthorizationPolicy = "ArticlesWrite";
+const string ArticlesWriteRoleName = "Articles.Write";
+
+// The write endpoints require this app role on the token, not just "any
+// valid token" — deliberately structured (per the BRD) so a narrower
+// Articles.Delete role can be added later without redesigning this.
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(ArticlesWriteAuthorizationPolicy, policy => policy.RequireRole(ArticlesWriteRoleName));
+});
 
 // Standardizes error bodies as RFC 7807 ProblemDetails JSON. Combined with
 // UseStatusCodePages() below, this covers both explicit Results.Problem(...)
@@ -40,6 +49,7 @@ else
 }
 
 const string ArticlesRateLimiterPolicy = "articles";
+const string ArticlesWriteRateLimiterPolicy = "articles-write";
 const string ApiKeyHeaderName = ApiSecurity.ApiKeyHeaderName;
 
 // Shared secret the Cloudflare Worker sends on the article endpoints' behalf.
@@ -59,6 +69,16 @@ builder.Services.AddRateLimiter(options =>
         RateLimitPartition.GetFixedWindowLimiter(
             ApiSecurity.GetRateLimitPartitionKey(httpContext),
             factory: _ => ApiSecurity.CreateArticlesLimiterOptions(permitLimit: 60, window: TimeSpan.FromMinutes(1))));
+
+    // A separate, tighter policy for the write endpoints — well below the
+    // read path's 60/min, since there's exactly one legitimate caller
+    // (Claude, via the client-credentials app) and no read-scale traffic to
+    // accommodate. Partitioned by AAD identity, not API key — see
+    // ApiSecurity.GetWriteRateLimitPartitionKey.
+    options.AddPolicy(ArticlesWriteRateLimiterPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ApiSecurity.GetWriteRateLimitPartitionKey(httpContext),
+            factory: _ => ApiSecurity.CreateArticlesLimiterOptions(permitLimit: 20, window: TimeSpan.FromMinutes(1))));
 });
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -79,18 +99,42 @@ builder.Services.AddOpenApi(options =>
             Description = "Shared-secret key sent by the Cloudflare Worker on behalf of the frontend."
         };
 
+        components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            Description = "Azure AD app-only token (client-credentials grant) carrying the Articles.Write app role — required for POST/PUT /articles."
+        };
+
         // Only the article endpoints require the key — /healthz stays open.
         var articleOperations = document.Paths
             .Where(path => path.Key.StartsWith("/articles", StringComparison.Ordinal))
-            .SelectMany(path => path.Value.Operations!.Values);
+            .SelectMany(path => path.Value.Operations!)
+            .ToList();
 
-        foreach (var operation in articleOperations)
+        foreach (var (operationType, operation) in articleOperations)
         {
             operation.Security ??= [];
-            operation.Security.Add(new()
+
+            // POST/PUT are the write endpoints — Azure AD bearer auth only, no
+            // API key (that shared secret is the Cloudflare Worker's, for
+            // public reads; writes don't go through the Worker). GET stays on
+            // the API key as before.
+            if (operationType == HttpMethod.Post || operationType == HttpMethod.Put)
             {
-                [new OpenApiSecuritySchemeReference("ApiKey", document)] = []
-            });
+                operation.Security.Add(new()
+                {
+                    [new OpenApiSecuritySchemeReference("Bearer", document)] = []
+                });
+            }
+            else
+            {
+                operation.Security.Add(new()
+                {
+                    [new OpenApiSecuritySchemeReference("ApiKey", document)] = []
+                });
+            }
         }
 
         return Task.CompletedTask;
@@ -162,8 +206,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 
-var scopeRequiredByApi = app.Configuration["AzureAd:Scopes"] ?? "";
-
 // The actual check lives in ApiSecurity (unit-tested there); this just
 // supplies the configured key from the closure.
 ValueTask<object?> RequireApiKey(EndpointFilterInvocationContext context, EndpointFilterDelegate next) =>
@@ -208,6 +250,63 @@ app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleReposit
 })
     .RequireRateLimiting(ArticlesRateLimiterPolicy)
     .AddEndpointFilter(RequireApiKey);
+
+// Write endpoints: Azure AD app-only auth (client-credentials + the
+// Articles.Write app role) instead of the API key — per the BRD, this
+// replaces manual hand-entry into Cosmos as the normal authoring path.
+// No API-key filter here on purpose; the Cloudflare Worker never writes.
+
+app.MapPost("/articles", async Task<IResult> (ArticleWriteRequest request, IArticleRepository articleRepository) =>
+{
+    var errors = ArticleWriteValidation.Validate(request);
+    if (errors.Count > 0)
+    {
+        return Results.Problem(string.Join(" ", errors), statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var created = await articleRepository.CreateArticleAsync(request);
+    if (created is null)
+    {
+        // CreateArticleAsync returns null only when the slug is already
+        // taken — the API doesn't auto-dedupe; per the BRD, the caller
+        // retries with a postfixed slug on this response.
+        return Results.Problem($"An article with slug '{request.Slug}' already exists.", statusCode: StatusCodes.Status409Conflict);
+    }
+
+    return Results.Created($"/articles/{created.Slug}", created);
+})
+    .RequireRateLimiting(ArticlesWriteRateLimiterPolicy)
+    .RequireAuthorization(ArticlesWriteAuthorizationPolicy);
+
+app.MapPut("/articles/{slug}", async Task<IResult> (string slug, ArticleWriteRequest request, IArticleRepository articleRepository) =>
+{
+    if (string.IsNullOrEmpty(slug))
+    {
+        return Results.Problem("Invalid slug", statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var errors = ArticleWriteValidation.Validate(request);
+    if (errors.Count > 0)
+    {
+        return Results.Problem(string.Join(" ", errors), statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    if (!string.Equals(slug, request.Slug, StringComparison.Ordinal))
+    {
+        return Results.Problem("The slug in the request body must match the slug in the URL.", statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var updated = await articleRepository.UpdateArticleAsync(slug, request);
+    if (updated is null)
+    {
+        // Update-only, not upsert — per the BRD, PUT never creates.
+        return Results.Problem("Article not found", statusCode: StatusCodes.Status404NotFound);
+    }
+
+    return Results.Json(updated);
+})
+    .RequireRateLimiting(ArticlesWriteRateLimiterPolicy)
+    .RequireAuthorization(ArticlesWriteAuthorizationPolicy);
 
 app.Run();
 
