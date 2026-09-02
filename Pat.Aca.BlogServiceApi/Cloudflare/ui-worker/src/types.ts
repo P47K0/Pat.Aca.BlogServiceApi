@@ -2,6 +2,11 @@ export interface Env {
   /** Base URL of the api-proxy Worker (blog-service-worker). Plain config
    * (wrangler.toml [vars]), not a secret — see wrangler.toml for why. */
   API_PROXY_BASE_URL: string;
+  /** This Worker's own public base URL (its custom domain), used to build
+   * absolute canonical/og:url links and the sitemap — can't be derived from
+   * the incoming request alone since Cloudflare's edge may see a different
+   * Host header than the public-facing domain. */
+  SITE_URL: string;
 }
 
 /** Shape returned by the api-proxy Worker's GET /articles and
