@@ -20,6 +20,10 @@ routes = [
 # by hand at some point after that file was last committed.
 [vars]
 API_PROXY_BASE_URL = "https://blog-api-proxy.pkoorevaar.workers.dev"
+# This Worker's own public URL — used to build absolute canonical/og:url
+# links and the sitemap (see SITE_URL in types.ts for why this can't just be
+# derived from the request).
+SITE_URL = "https://blog.koorevaar.com"
 
 # Persists console.log/console.error output so the dashboard's Logs tab shows
 # past requests, not just a live stream started after the fact — without
