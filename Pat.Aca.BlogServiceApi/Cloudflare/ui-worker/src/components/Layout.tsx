@@ -49,6 +49,14 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
         <meta name="description" content={description} />
         <link rel="canonical" href={canonicalUrl} />
         <meta name="robots" content={noindex ? 'noindex, nofollow' : 'index, follow'} />
+        {/* Relative href resolves against whatever page it's on — no need to
+            thread SITE_URL down here just for feed auto-discovery. */}
+        <link
+          rel="alternate"
+          type="application/rss+xml"
+          title="koorevaar.com Blog"
+          href="/feed.xml"
+        />
 
         {/* Open Graph — all values come from data the API already returns
             (title/summary/publishedAt/tags), nothing new to author. No
@@ -111,7 +119,18 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
         </header>
         <main class="flex-1 w-full max-w-2xl mx-auto px-6 py-10">{children}</main>
         <footer class="border-t border-gray-200 px-6 py-4 text-center text-sm text-gray-500">
-          Served by ui-worker via api-proxy · Pat.Aca.BlogServiceApi
+          <div class="flex items-center justify-center gap-1">
+            <span>Served by ui-worker via api-proxy · Pat.Aca.BlogServiceApi ·</span>
+            <a
+              href="/feed.xml"
+              class="inline-flex items-center gap-1 transition hover:text-blue-600"
+            >
+              {/* Same Font Awesome Free icon set as the header's Home button. */}
+              {/*<!--Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.-->*/}
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" class="h-3.5 w-3.5" fill="currentColor"><path d="M0 64C0 46.3 14.3 32 32 32c229.8 0 416 186.2 416 416c0 17.7-14.3 32-32 32s-32-14.3-32-32C384 253.6 226.4 96 32 96C14.3 96 0 81.7 0 64zM0 416a64 64 0 1 1 128 0A64 64 0 1 1 0 416zM32 160c159.1 0 288 128.9 288 288c0 17.7-14.3 32-32 32s-32-14.3-32-32c0-123.7-100.3-224-224-224c-17.7 0-32-14.3-32-32s14.3-32 32-32z" /></svg>
+              RSS
+            </a>
+          </div>
         </footer>
       </body>
     </html>
