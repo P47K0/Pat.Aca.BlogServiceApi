@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from './types';
 import { UpstreamError } from './types';
 import { getArticleBySlug, getArticles } from './lib/blog-client';
+import { escapeXml } from './lib/xml';
 import { Layout } from './components/Layout';
 import { HomePage } from './pages/Home';
 import { TagPage } from './pages/TagPage';
@@ -101,6 +102,39 @@ app.get('/sitemap.xml', async (c) => {
     '',
   ].join('\n');
   return c.body(body, 200, { 'Content-Type': 'application/xml; charset=UTF-8' });
+});
+
+// Plain RSS 2.0 feed, most-recent-first (getArticles() is already sorted that
+// way). Uses `summary` per item, not the full rendered `content` — keeps the
+// feed small and avoids re-escaping already-rendered HTML inside XML.
+app.get('/feed.xml', async (c) => {
+  const articles = await getArticles(c.env);
+  const siteUrl = c.env.SITE_URL;
+  const items = articles
+    .map((article) => {
+      const articleUrl = `${siteUrl}/articles/${article.slug}`;
+      return `  <item>
+    <title>${escapeXml(article.title)}</title>
+    <link>${articleUrl}</link>
+    <guid isPermaLink="true">${articleUrl}</guid>
+    <pubDate>${new Date(article.publishedAt).toUTCString()}</pubDate>
+    <description>${escapeXml(article.summary)}</description>
+  </item>`;
+    })
+    .join('\n');
+  const body = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+  <title>koorevaar.com Blog</title>
+  <link>${siteUrl}/</link>
+  <description>${escapeXml(SITE_DESCRIPTION)}</description>
+  <language>en</language>
+  <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+${items}
+</channel>
+</rss>
+`;
+  return c.body(body, 200, { 'Content-Type': 'application/rss+xml; charset=UTF-8' });
 });
 
 app.notFound((c) =>
