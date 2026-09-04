@@ -25,6 +25,53 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+// --- Stale-while-revalidate cache -----------------------------------------
+//
+// blog-service-api's Container App scales to zero, so any request after an
+// idle period pays full cold-start latency — worst case a reader clicking an
+// article link right after the container's gone idle. Rather than a plain
+// TTL cache (which still makes *someone* pay the cold start once the TTL
+// expires), this always serves whatever is currently cached immediately, and
+// only refreshes the cache from origin in the background, at most once per
+// REVALIDATE_INTERVAL_MS per route. That interval is a rate-limit on
+// re-checking the origin, not an expiry — a cached entry never goes stale
+// from age alone, so no real visitor waits on a cold start once *any* cached
+// copy exists. Only a true first-ever request for a route (or a cache entry
+// evicted by Cloudflare) still pays a synchronous cold start.
+//
+// Accepted trade-off: the background refresh still hits the real origin and
+// increments its viewCount for real, but only once per interval regardless
+// of how many reads happen in between — an accepted undercount, not a bug.
+// No purge-on-write is needed either: staleness after an edit the user makes
+// themselves is already bounded to REVALIDATE_INTERVAL_MS by the background
+// refresh itself.
+//
+// A cold start on this container was measured at ~30s (2026-09-04), well
+// under this interval — so the interval isn't hiding an unknown worst case,
+// it's a deliberate choice of how often to pay a background (never
+// visitor-facing) cold start in exchange for fresher content and a tighter
+// viewCount undercount bound after an edit.
+const REVALIDATE_INTERVAL_MS = 1 * 60 * 1000;
+
+// Custom header recording when a cached response was fetched from origin, so
+// a later request can tell whether it's due for a background refresh. Not a
+// standard cache-control header — we want "never auto-expire, just rate-limit
+// re-checks", which s-maxage/Cache-Control don't express on their own.
+const CACHED_AT_HEADER = 'X-Swr-Cached-At';
+
+// Cloudflare's Cache API is per-colo, not a single global cache, so
+// "at most once per ~3 min per route" is actually per edge location that
+// happens to see traffic for that route — a known limitation of this
+// approach, accepted rather than reaching for a global store (e.g. KV) for
+// what's ultimately a soft rate-limit on re-checking origin.
+const cache = caches.default;
+
+/** Cache key independent of query string — this Worker's routing already
+ * ignores query params, so the cache should too. */
+function cacheKeyFor(pathname: string, requestUrl: string): Request {
+  return new Request(new URL(pathname, requestUrl).toString(), { method: 'GET' });
+}
+
 // Shape returned by GET /articles and GET /articles/{slug} on the API side
 // (System.Text.Json's Web defaults camelCase the Article record's properties).
 interface Article {
@@ -47,11 +94,20 @@ function renderArticleContent(article: Article): Article {
   };
 }
 
-/** Proxies a GET to the API, attaching the shared API key, and — for
- * successful JSON responses only — rewrites each article's `content` from
- * Markdown to HTML. Error responses (the API's RFC 7807 problem+json for
- * 401/404/429/500) are passed through untouched, nothing to render there. */
-async function proxyArticlesRequest(env: Env, pathname: string): Promise<Response> {
+/** Result of fetching from origin: `cacheable` is true only for a
+ * successfully rendered article JSON response — error/non-JSON passthroughs
+ * are never cached, so a transient origin failure can't clobber a good cached
+ * copy, and a stale-but-good entry just gets retried on the next request. */
+interface UpstreamResult {
+  response: Response;
+  cacheable: boolean;
+}
+
+/** Fetches from the API, attaching the shared API key, and — for successful
+ * JSON responses only — rewrites each article's `content` from Markdown to
+ * HTML. Error responses (the API's RFC 7807 problem+json for 401/404/429/500)
+ * are passed through untouched, nothing to render there. */
+async function fetchAndRender(env: Env, pathname: string): Promise<UpstreamResult> {
   const upstreamUrl = new URL(pathname, env.API_BASE_URL);
 
   const upstreamResponse = await fetch(upstreamUrl.toString(), {
@@ -68,7 +124,10 @@ async function proxyArticlesRequest(env: Env, pathname: string): Promise<Respons
     for (const [key, value] of Object.entries(CORS_HEADERS)) {
       headers.set(key, value);
     }
-    return new Response(upstreamResponse.body, { status: upstreamResponse.status, headers });
+    return {
+      response: new Response(upstreamResponse.body, { status: upstreamResponse.status, headers }),
+      cacheable: false,
+    };
   }
 
   const body = await upstreamResponse.json();
@@ -76,19 +135,63 @@ async function proxyArticlesRequest(env: Env, pathname: string): Promise<Respons
     ? (body as Article[]).map(renderArticleContent)
     : renderArticleContent(body as Article);
 
-  return new Response(JSON.stringify(rendered), {
-    status: upstreamResponse.status,
-    headers: {
-      'Content-Type': 'application/json',
-      ...CORS_HEADERS,
-    },
-  });
+  return {
+    response: new Response(JSON.stringify(rendered), {
+      status: upstreamResponse.status,
+      headers: {
+        'Content-Type': 'application/json',
+        [CACHED_AT_HEADER]: String(Date.now()),
+        ...CORS_HEADERS,
+      },
+    }),
+    cacheable: true,
+  };
+}
+
+/** Background refresh: refetches from origin and, only on success, replaces
+ * the cache entry (updating its cached-at timestamp). On failure the
+ * existing cached copy — stale or not — is left exactly as-is, so it keeps
+ * being served and the next request past the interval just tries again. */
+async function revalidate(env: Env, pathname: string, key: Request): Promise<void> {
+  const { response, cacheable } = await fetchAndRender(env, pathname);
+  if (cacheable) {
+    await cache.put(key, response);
+  }
+}
+
+/** Proxies a GET to the API with stale-while-revalidate caching: an existing
+ * cache entry is always served immediately; a background refresh is kicked
+ * off (not awaited) only when it's older than REVALIDATE_INTERVAL_MS. On a
+ * cold cache miss, fetches synchronously (nothing to serve yet) and seeds
+ * the cache for next time. */
+async function proxyArticlesRequest(
+  env: Env,
+  ctx: ExecutionContext,
+  pathname: string,
+  requestUrl: string,
+): Promise<Response> {
+  const key = cacheKeyFor(pathname, requestUrl);
+
+  const cached = await cache.match(key);
+  if (cached) {
+    const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
+    if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
+      ctx.waitUntil(revalidate(env, pathname, key));
+    }
+    return cached;
+  }
+
+  const { response, cacheable } = await fetchAndRender(env, pathname);
+  if (cacheable) {
+    ctx.waitUntil(cache.put(key, response.clone()));
+  }
+  return response;
 }
 
 const ARTICLE_SLUG_PATH = /^\/articles\/[^/]+$/;
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: CORS_HEADERS });
     }
@@ -101,7 +204,7 @@ export default {
 
     // Routes mirror the API's exactly: /articles and /articles/{slug}.
     if (pathname === '/articles' || ARTICLE_SLUG_PATH.test(pathname)) {
-      return proxyArticlesRequest(env, pathname);
+      return proxyArticlesRequest(env, ctx, pathname, request.url);
     }
 
     return new Response('Not found', { status: 404, headers: CORS_HEADERS });
