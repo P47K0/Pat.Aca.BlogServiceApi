@@ -87,10 +87,39 @@ interface Article {
   viewCount: number;
 }
 
+/** Every article's Markdown source conventionally opens with a `# Title`
+ * line mirroring `article.title` — but ArticleDetailPage (ui-worker) already
+ * renders its own `<h1>{article.title}</h1>` above the content, so that
+ * leading heading renders a second time, styled differently by the `.prose`
+ * typography classes. Strip it here, once, for every reader — cheaper than
+ * editing 35+ stored articles individually.
+ *
+ * Only strips when the heading's text actually equals the title: at least
+ * one article (`website-blog-feature`) opens with a genuinely different
+ * subtitle rather than a repeated title, and that must survive untouched. */
+function stripDuplicateLeadingH1(html: string, title: string): string {
+  const match = html.match(/^\s*<h1[^>]*>([\s\S]*?)<\/h1>\s*/i);
+  if (!match) return html;
+
+  const headingText = match[1]
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+
+  return headingText === title.trim() ? html.slice(match[0].length) : html;
+}
+
 function renderArticleContent(article: Article): Article {
   return {
     ...article,
-    content: marked.parse(article.content, { async: false }) as string,
+    content: stripDuplicateLeadingH1(
+      marked.parse(article.content, { async: false }) as string,
+      article.title,
+    ),
   };
 }
 
