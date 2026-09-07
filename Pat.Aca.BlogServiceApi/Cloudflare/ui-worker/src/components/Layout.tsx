@@ -82,8 +82,14 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
             type="application/ld+json"
             // Same trusted-content trade-off as ArticleDetailPage's rendered
             // HTML — jsonLd is always built here from API data, never from
-            // unescaped user input.
-            dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+            // unescaped user input. The `<` escape below is a separate,
+            // narrower concern: JSON.stringify doesn't escape it, so a
+            // title/summary containing the literal string "</script>" would
+            // otherwise close this tag early and let the rest of its value
+            // be parsed as HTML. `<` is valid inside a JSON string and
+            // still parses back to "<" — this only changes how the *script
+            // tag's contents* are delimited, not the JSON-LD data itself.
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
           />
         )}
 
