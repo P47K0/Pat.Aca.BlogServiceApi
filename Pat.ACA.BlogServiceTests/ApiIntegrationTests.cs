@@ -90,6 +90,74 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task GET_articles_with_no_query_params_has_no_pagination_headers()
+        {
+            // Backward-compat pin: the plain (unpaginated) request — what
+            // sitemap.xml/feed.xml/the tag cloud/api-proxy's SWR cache all
+            // still send — must look exactly as it did before pagination
+            // existed, headers included.
+            var response = await _client.GetAsync("/articles");
+
+            response.EnsureSuccessStatusCode();
+            Assert.False(response.Headers.Contains("X-Has-More"));
+            Assert.False(response.Headers.Contains("X-Next-Cursor"));
+        }
+
+        [Fact]
+        public async Task GET_articles_with_limit_returns_a_page_and_has_more_header()
+        {
+            var response = await _client.GetAsync("/articles?limit=1");
+
+            response.EnsureSuccessStatusCode();
+            var articles = await response.Content.ReadFromJsonAsync<List<Article>>();
+
+            Assert.NotNull(articles);
+            Assert.Single(articles!);
+            Assert.True(response.Headers.TryGetValues("X-Has-More", out var hasMoreValues));
+            Assert.Equal("true", hasMoreValues!.Single());
+            Assert.True(response.Headers.TryGetValues("X-Next-Cursor", out var cursorValues));
+            Assert.Equal(articles![0].Slug, cursorValues!.Single());
+        }
+
+        [Fact]
+        public async Task GET_articles_with_after_cursor_returns_the_next_page()
+        {
+            var firstPage = await _client.GetAsync("/articles?limit=1");
+            var firstPageArticles = await firstPage.Content.ReadFromJsonAsync<List<Article>>();
+            var cursor = firstPage.Headers.GetValues("X-Next-Cursor").Single();
+
+            var secondPage = await _client.GetAsync($"/articles?limit=1&after={cursor}");
+            secondPage.EnsureSuccessStatusCode();
+            var secondPageArticles = await secondPage.Content.ReadFromJsonAsync<List<Article>>();
+
+            Assert.NotNull(secondPageArticles);
+            Assert.Single(secondPageArticles!);
+            Assert.NotEqual(firstPageArticles![0].Slug, secondPageArticles![0].Slug);
+            // Don't assert a specific has-more value here: FakeArticleRepository's
+            // seed list is a static field shared with ApiWriteIntegrationTests,
+            // which runs concurrently and adds articles of its own — so the
+            // total published count isn't stable across the whole test run.
+            // Just pin the structural invariant instead: a header carrying a
+            // cursor is present if and only if has-more says true.
+            var hasMore = secondPage.Headers.GetValues("X-Has-More").Single();
+            Assert.Contains(hasMore, new[] { "true", "false" });
+            Assert.Equal(hasMore == "true", secondPage.Headers.Contains("X-Next-Cursor"));
+        }
+
+        [Fact]
+        public async Task GET_articles_with_unknown_after_cursor_falls_back_to_the_first_page()
+        {
+            var firstPage = await _client.GetAsync("/articles?limit=1");
+            var firstPageArticles = await firstPage.Content.ReadFromJsonAsync<List<Article>>();
+
+            var response = await _client.GetAsync("/articles?limit=1&after=this-slug-does-not-exist");
+            response.EnsureSuccessStatusCode();
+            var articles = await response.Content.ReadFromJsonAsync<List<Article>>();
+
+            Assert.Equal(firstPageArticles![0].Slug, articles![0].Slug);
+        }
+
+        [Fact]
         public async Task GET_articles_slug_returns_200_for_valid_slug()
         {
             var response = await _client.GetAsync("/articles/first-article");

@@ -213,10 +213,32 @@ ValueTask<object?> RequireApiKey(EndpointFilterInvocationContext context, Endpoi
 
 app.MapGet("/healthz", () => "Healthy");
 
-app.MapGet("/articles", async (IArticleRepository articleRepository) =>
+// Pagination (?limit=&after=) is opt-in: with neither param, behavior is
+// byte-for-byte what it always was — the full list, plain array, no new
+// response headers — so sitemap.xml/feed.xml/the tag cloud/api-proxy's
+// existing SWR cache (all of which call this with no query string) are
+// completely unaffected. Only the "load more" infinite-scroll path
+// (ui-worker) passes limit/after. See IArticleRepository.GetArticlesPageAsync.
+const int MaxArticlesPageSize = 50;
+
+app.MapGet("/articles", async (int? limit, string? after, IArticleRepository articleRepository, HttpContext httpContext) =>
 {
-    var articles = await articleRepository.GetArticlesAsync();
-    return Results.Json(articles);
+    if (limit is null)
+    {
+        var articles = await articleRepository.GetArticlesAsync();
+        return Results.Json(articles);
+    }
+
+    var clampedLimit = Math.Clamp(limit.Value, 1, MaxArticlesPageSize);
+    var page = await articleRepository.GetArticlesPageAsync(clampedLimit, after);
+
+    httpContext.Response.Headers["X-Has-More"] = page.HasMore ? "true" : "false";
+    if (page.NextCursor is not null)
+    {
+        httpContext.Response.Headers["X-Next-Cursor"] = page.NextCursor;
+    }
+
+    return Results.Json(page.Items);
 })
     .RequireRateLimiting(ArticlesRateLimiterPolicy)
     .AddEndpointFilter(RequireApiKey);

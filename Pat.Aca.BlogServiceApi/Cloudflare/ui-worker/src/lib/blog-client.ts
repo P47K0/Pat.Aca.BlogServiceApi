@@ -16,6 +16,36 @@ export async function getArticles(env: Env): Promise<Article[]> {
   return response.json();
 }
 
+export interface ArticlesPage {
+  articles: Article[];
+  hasMore: boolean;
+  /** Slug to pass back as `after` for the next page — null once hasMore is
+   * false. */
+  nextCursor: string | null;
+}
+
+/** Fetches one page of articles for infinite scroll's "load more" — the
+ * homepage's own initial 10 come from getArticles() above instead (already
+ * needed there for the tag cloud), this is only for article 11 onward. */
+export async function getArticlesPage(env: Env, limit: number, after: string | null): Promise<ArticlesPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (after) {
+    params.set('after', after);
+  }
+
+  const response = await fetchFromProxy(env, `/articles?${params.toString()}`);
+  if (!response.ok) {
+    throw new UpstreamError(`GET /articles?${params.toString()} failed with status ${response.status}`);
+  }
+
+  const articles = (await response.json()) as Article[];
+  return {
+    articles,
+    hasMore: response.headers.get('X-Has-More') === 'true',
+    nextCursor: response.headers.get('X-Next-Cursor'),
+  };
+}
+
 /** Fetches one article by slug, or null if api-proxy/the API returned 404
  * (unknown slug or a future-dated article — both 404 there). */
 export async function getArticleBySlug(env: Env, slug: string): Promise<Article | null> {

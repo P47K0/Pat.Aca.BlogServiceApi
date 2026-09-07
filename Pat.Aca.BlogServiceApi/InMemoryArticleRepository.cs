@@ -15,6 +15,27 @@ namespace Pat.Aca.BlogServiceApi
                 .OrderByDescending(a => a.PublishedAt)
                 .ToList());
 
+        public async Task<ArticlesPage> GetArticlesPageAsync(int limit, string? afterSlug)
+        {
+            var published = await GetArticlesAsync();
+
+            // Unknown/stale cursor falls back to the first page (index 0) —
+            // see the doc comment on IArticleRepository.GetArticlesPageAsync.
+            var startIndex = 0;
+            if (!string.IsNullOrEmpty(afterSlug))
+            {
+                var cursorIndex = published.FindIndex(a => a.Slug == afterSlug);
+                if (cursorIndex >= 0)
+                {
+                    startIndex = cursorIndex + 1;
+                }
+            }
+
+            var page = published.Skip(startIndex).Take(limit).ToList();
+            var hasMore = startIndex + page.Count < published.Count;
+            return new ArticlesPage(page, hasMore, hasMore ? page[^1].Slug : null);
+        }
+
         public Task<Article?> GetArticleBySlugAsync(string slug) =>
             Task.FromResult(SeedArticles.FirstOrDefault(a => a.Slug == slug && a.PublishedAt <= DateTime.UtcNow));
 

@@ -69,10 +69,15 @@ const CACHED_AT_HEADER = 'X-Swr-Cached-At';
 // what's ultimately a soft rate-limit on re-checking origin.
 const cache = caches.default;
 
-/** Cache key independent of query string — this Worker's routing already
- * ignores query params, so the cache should too. */
-function cacheKeyFor(pathname: string, requestUrl: string): Request {
-  return new Request(new URL(pathname, requestUrl).toString(), { method: 'GET' });
+/** Cache key. Includes the query string — needed since GET /articles?limit=
+ * &after= (infinite-scroll pagination, below) is a genuinely different
+ * response per combination of params, unlike every other route/request this
+ * Worker has ever served, which never varied by query string. The plain
+ * `/articles` and `/articles/{slug}` requests (home page, tag pages,
+ * sitemap.xml, feed.xml) never carry a query string, so their cache key is
+ * unchanged — this only starts mattering for the new paginated requests. */
+function cacheKeyFor(pathname: string, search: string, requestUrl: string): Request {
+  return new Request(new URL(pathname + search, requestUrl).toString(), { method: 'GET' });
 }
 
 // Shape returned by GET /articles and GET /articles/{slug} on the API side
@@ -135,12 +140,17 @@ interface UpstreamResult {
   cacheable: boolean;
 }
 
+// Forwarded from the API's response as-is when present — the infinite-scroll
+// "load more" pagination signal (see GET /articles?limit=&after= on the API
+// side). Absent entirely on an unpaginated request, same as today.
+const PAGINATION_HEADERS = ['X-Has-More', 'X-Next-Cursor'];
+
 /** Fetches from the API, attaching the shared API key, and — for successful
  * JSON responses only — rewrites each article's `content` from Markdown to
  * HTML. Error responses (the API's RFC 7807 problem+json for 401/404/429/500)
  * are passed through untouched, nothing to render there. */
-async function fetchAndRender(env: Env, pathname: string): Promise<UpstreamResult> {
-  const upstreamUrl = new URL(pathname, env.API_BASE_URL);
+async function fetchAndRender(env: Env, pathname: string, search: string): Promise<UpstreamResult> {
+  const upstreamUrl = new URL(pathname + search, env.API_BASE_URL);
 
   const upstreamResponse = await fetch(upstreamUrl.toString(), {
     method: 'GET',
@@ -167,14 +177,20 @@ async function fetchAndRender(env: Env, pathname: string): Promise<UpstreamResul
     ? (body as Article[]).map(renderArticleContent)
     : renderArticleContent(body as Article);
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    [CACHED_AT_HEADER]: String(Date.now()),
+    ...CORS_HEADERS,
+  };
+  for (const name of PAGINATION_HEADERS) {
+    const value = upstreamResponse.headers.get(name);
+    if (value !== null) headers[name] = value;
+  }
+
   return {
     response: new Response(JSON.stringify(rendered), {
       status: upstreamResponse.status,
-      headers: {
-        'Content-Type': 'application/json',
-        [CACHED_AT_HEADER]: String(Date.now()),
-        ...CORS_HEADERS,
-      },
+      headers,
     }),
     cacheable: true,
   };
@@ -184,12 +200,15 @@ async function fetchAndRender(env: Env, pathname: string): Promise<UpstreamResul
  * the cache entry (updating its cached-at timestamp). On failure the
  * existing cached copy — stale or not — is left exactly as-is, so it keeps
  * being served and the next request past the interval just tries again. */
-async function revalidate(env: Env, pathname: string, key: Request): Promise<void> {
-  const { response, cacheable } = await fetchAndRender(env, pathname);
+async function revalidate(env: Env, pathname: string, search: string, key: Request): Promise<void> {
+  const { response, cacheable } = await fetchAndRender(env, pathname, search);
   if (cacheable) {
     // Snapshot from a clone *before* cache.put() gets the original — put()
-    // consumes the response body, so cloning after would be too late.
-    if (pathname === LIST_PATH) {
+    // consumes the response body, so cloning after would be too late. Only
+    // the plain (unpaginated) list request updates the durable "latest 10"
+    // snapshot — a paginated page's background refresh has no business
+    // overwriting it with a partial slice.
+    if (pathname === LIST_PATH && search === '') {
       await writeFallbackSnapshot(env, response.clone());
     }
     await cache.put(key, response);
@@ -239,20 +258,29 @@ async function readFallbackSnapshot(env: Env): Promise<Response | null> {
   });
 }
 
-/** Cold-miss handling for the list route only: races the real origin fetch
- * against ORIGIN_TIMEOUT_MS. If origin wins, behaves exactly like the normal
- * path (render, cache, snapshot). If the timeout wins — or the fetch throws —
- * and a durable snapshot exists, that's served immediately while the real
- * fetch keeps running in the background (still updating the Cache API entry
- * and the snapshot whenever it does eventually resolve). If there's no
- * snapshot yet (e.g. very first request ever), this just falls back to
- * waiting on origin, same as before this feature existed. */
+/** Cold-miss handling for the plain (unpaginated) list request only — never
+ * called for a paginated `?limit=&after=` request (see proxyArticlesRequest):
+ * the durable snapshot only ever holds the latest-10 unpaginated shape, so it
+ * has nothing to offer a specific page/cursor. Infinite-scroll's "load more"
+ * requests fall through to the plain cache/fetch path below instead, with no
+ * durable-fallback protection — an accepted gap, since that's a progressive
+ * enhancement on top of an already-rendered page, not the critical first
+ * paint this fallback exists to protect.
+ *
+ * Races the real origin fetch against ORIGIN_TIMEOUT_MS. If origin wins,
+ * behaves exactly like the normal path (render, cache, snapshot). If the
+ * timeout wins — or the fetch throws — and a durable snapshot exists, that's
+ * served immediately while the real fetch keeps running in the background
+ * (still updating the Cache API entry and the snapshot whenever it does
+ * eventually resolve). If there's no snapshot yet (e.g. very first request
+ * ever), this just falls back to waiting on origin, same as before this
+ * feature existed. */
 async function fetchListWithFallback(
   env: Env,
   ctx: ExecutionContext,
   key: Request,
 ): Promise<Response> {
-  const originPromise = fetchAndRender(env, LIST_PATH).then(async ({ response, cacheable }) => {
+  const originPromise = fetchAndRender(env, LIST_PATH, '').then(async ({ response, cacheable }) => {
     if (cacheable) {
       // Snapshot from clones taken while the body is still unread — both put()
       // and the eventual `return response` each need their own intact copy.
@@ -295,30 +323,35 @@ async function fetchListWithFallback(
  * cache entry is always served immediately; a background refresh is kicked
  * off (not awaited) only when it's older than REVALIDATE_INTERVAL_MS. On a
  * cold cache miss, fetches synchronously (nothing to serve yet) and seeds
- * the cache for next time — except the list route, which races that fetch
- * against a durable fallback (see fetchListWithFallback above). */
+ * the cache for next time — except the *plain* list route (no query string),
+ * which races that fetch against a durable fallback (see
+ * fetchListWithFallback above). A paginated list request
+ * (`/articles?limit=&after=`, infinite scroll's "load more") gets its own
+ * cache entry via the query-string-aware cache key, but not the durable
+ * fallback — same generic cold-miss path as the article detail route. */
 async function proxyArticlesRequest(
   env: Env,
   ctx: ExecutionContext,
   pathname: string,
+  search: string,
   requestUrl: string,
 ): Promise<Response> {
-  const key = cacheKeyFor(pathname, requestUrl);
+  const key = cacheKeyFor(pathname, search, requestUrl);
 
   const cached = await cache.match(key);
   if (cached) {
     const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
     if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
-      ctx.waitUntil(revalidate(env, pathname, key));
+      ctx.waitUntil(revalidate(env, pathname, search, key));
     }
     return cached;
   }
 
-  if (pathname === LIST_PATH) {
+  if (pathname === LIST_PATH && search === '') {
     return fetchListWithFallback(env, ctx, key);
   }
 
-  const { response, cacheable } = await fetchAndRender(env, pathname);
+  const { response, cacheable } = await fetchAndRender(env, pathname, search);
   if (cacheable) {
     ctx.waitUntil(cache.put(key, response.clone()));
   }
@@ -337,11 +370,15 @@ export default {
       return new Response(null, { status: 405, headers: CORS_HEADERS });
     }
 
-    const { pathname } = new URL(request.url);
+    const { pathname, search } = new URL(request.url);
 
-    // Routes mirror the API's exactly: /articles and /articles/{slug}.
+    // Routes mirror the API's exactly: /articles and /articles/{slug}. Only
+    // /articles ever carries a query string (?limit=&after=, infinite
+    // scroll's pagination) — the API ignores/doesn't expect one on the
+    // detail route, so it's passed through here regardless without a
+    // special case.
     if (pathname === '/articles' || ARTICLE_SLUG_PATH.test(pathname)) {
-      return proxyArticlesRequest(env, ctx, pathname, request.url);
+      return proxyArticlesRequest(env, ctx, pathname, search, request.url);
     }
 
     return new Response('Not found', { status: 404, headers: CORS_HEADERS });
