@@ -13,3 +13,13 @@ compatibility_date = "2026-08-25"
 #   wrangler secret put ARTICLES_API_KEY
 [vars]
 API_BASE_URL = "https://blog-service-api.whitewater-2e220d9b.westeurope.azurecontainerapps.io"
+
+# Durable (global, not per-colo like the Cache API) fallback store for the
+# latest-10 article list — see the "Durable list fallback" section in
+# src/index.ts. This container has no Cloudflare auth to create the
+# namespace itself; before deploying, run:
+#   wrangler kv namespace create ARTICLES_FALLBACK
+# and replace the placeholder id below with the one it prints.
+[[kv_namespaces]]
+binding = "ARTICLES_FALLBACK"
+id = "REPLACE_WITH_REAL_KV_NAMESPACE_ID"
