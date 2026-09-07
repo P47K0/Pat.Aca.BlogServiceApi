@@ -150,6 +150,67 @@ namespace Pat.Aca.BlogServiceApi
             return articles;
         }
 
+        public async Task<ArticlesPage> GetArticlesPageAsync(int limit, string? afterSlug)
+        {
+            // Cursor is the previous page's last article's slug. Resolve it
+            // to that article's own publishedAt first — needed so the main
+            // query below can express "strictly after this article in the
+            // newest-first ordering" without re-deriving it from scratch.
+            // Same graceful-fallback-to-page-one behavior as
+            // InMemoryArticleRepository/FakeArticleRepository if the slug
+            // doesn't match any published article (deleted, or just wrong).
+            DateTime? cursorPublishedAt = null;
+            if (!string.IsNullOrEmpty(afterSlug))
+            {
+                var cursorQuery = new QueryDefinition(
+                    "SELECT VALUE c.publishedAt FROM c WHERE c.slug = @slug AND c.publishedAt <= @now")
+                    .WithParameter("@slug", afterSlug)
+                    .WithParameter("@now", DateTime.UtcNow);
+
+                using FeedIterator<DateTime> cursorIterator = _container.GetItemQueryIterator<DateTime>(cursorQuery);
+                while (cursorIterator.HasMoreResults && cursorPublishedAt is null)
+                {
+                    FeedResponse<DateTime> response = await cursorIterator.ReadNextAsync();
+                    if (response.Resource.Any())
+                    {
+                        cursorPublishedAt = response.Resource.First();
+                    }
+                }
+            }
+
+            // Ties on publishedAt (same instant) are broken by slug — folded
+            // into the WHERE clause rather than a second ORDER BY field, so
+            // this stays a single-field ORDER BY like the unpaginated query
+            // above and doesn't need a composite index. Fetch one extra
+            // document to know whether a next page exists without a second
+            // round trip.
+            QueryDefinition query = cursorPublishedAt is null
+                ? new QueryDefinition(
+                    "SELECT TOP @take * FROM c WHERE c.publishedAt <= @now ORDER BY c.publishedAt DESC")
+                    .WithParameter("@take", limit + 1)
+                    .WithParameter("@now", DateTime.UtcNow)
+                : new QueryDefinition(
+                    "SELECT TOP @take * FROM c WHERE c.publishedAt <= @now " +
+                    "AND (c.publishedAt < @cursorPublishedAt OR (c.publishedAt = @cursorPublishedAt AND c.slug < @afterSlug)) " +
+                    "ORDER BY c.publishedAt DESC")
+                    .WithParameter("@take", limit + 1)
+                    .WithParameter("@now", DateTime.UtcNow)
+                    .WithParameter("@cursorPublishedAt", cursorPublishedAt.Value)
+                    .WithParameter("@afterSlug", afterSlug);
+
+            using FeedIterator<ArticleDocument> iterator = _container.GetItemQueryIterator<ArticleDocument>(query);
+            List<Article> fetched = new();
+            while (iterator.HasMoreResults && fetched.Count < limit + 1)
+            {
+                FeedResponse<ArticleDocument> response = await iterator.ReadNextAsync();
+                fetched.AddRange(response.Resource.Select(ToArticle));
+            }
+
+            var hasMore = fetched.Count > limit;
+            var page = hasMore ? fetched.Take(limit).ToList() : fetched;
+            return new ArticlesPage(page, hasMore, hasMore ? page[^1].Slug : null);
+        }
+
         public async Task<Article?> IncrementViewCountAsync(string slug)
         {
             // Cosmos's own system "id" — mandatory on every document, always a

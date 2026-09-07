@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import type { Env } from './types';
 import { UpstreamError } from './types';
-import { getArticleBySlug, getArticles } from './lib/blog-client';
+import { getArticleBySlug, getArticles, getArticlesPage } from './lib/blog-client';
 import { escapeXml } from './lib/xml';
 import { Layout } from './components/Layout';
-import { HomePage } from './pages/Home';
+import { ArticlesFragment } from './components/ArticlesFragment';
+import { HomePage, LOAD_MORE_PAGE_SIZE } from './pages/Home';
 import { TagPage } from './pages/TagPage';
 import { ArticleDetailPage } from './pages/ArticleDetail';
 import { NotFoundPage } from './pages/NotFound';
@@ -25,6 +26,22 @@ app.get('/', async (c) => {
       <HomePage articles={articles} />
     </Layout>,
   );
+});
+
+// Infinite scroll's "load more" — fetched by Home.tsx's inline client
+// script, not linked/navigated to directly. Returns a bare HTML fragment
+// (ArticlesFragment), not a full <Layout> page. `after` is required: the
+// client always has a real cursor (the last-rendered article's slug) by
+// construction, so a missing one means a malformed request, not a normal
+// case worth a graceful fallback.
+app.get('/partials/articles', async (c) => {
+  const after = c.req.query('after');
+  if (!after) {
+    return c.text('Missing required "after" query param', 400);
+  }
+
+  const page = await getArticlesPage(c.env, LOAD_MORE_PAGE_SIZE, after);
+  return c.html(<ArticlesFragment articles={page.articles} hasMore={page.hasMore} nextCursor={page.nextCursor} />);
 });
 
 app.get('/tags/:tag', async (c) => {

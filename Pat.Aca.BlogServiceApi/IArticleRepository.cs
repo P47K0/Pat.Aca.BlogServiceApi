@@ -3,6 +3,23 @@ namespace Pat.Aca.BlogServiceApi
     public interface IArticleRepository
     {
         Task<List<Article>> GetArticlesAsync();
+
+        /// <summary>
+        /// Cursor-paginated slice of the same newest-first, future-excluded
+        /// ordering as <see cref="GetArticlesAsync"/> — powers the blog
+        /// homepage's "load more" infinite scroll (article 11 onward; the
+        /// first 10 are still rendered from a plain <see
+        /// cref="GetArticlesAsync"/> call, since the tag cloud already needs
+        /// the full list on every home page load anyway). <paramref
+        /// name="afterSlug"/> is the previous page's last article's slug, or
+        /// null/empty for the first page. An <paramref name="afterSlug"/>
+        /// that doesn't match any published article (deleted, or simply
+        /// wrong) is treated the same as no cursor — gracefully falls back
+        /// to the first page rather than erroring, since a stale
+        /// client-held cursor is an expected, not exceptional, case.
+        /// </summary>
+        Task<ArticlesPage> GetArticlesPageAsync(int limit, string? afterSlug);
+
         Task<Article?> GetArticleBySlugAsync(string slug);
 
         /// <summary>
