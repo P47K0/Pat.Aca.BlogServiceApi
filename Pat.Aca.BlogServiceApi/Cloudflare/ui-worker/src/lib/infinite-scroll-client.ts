@@ -14,12 +14,17 @@
  * origin — infinite scroll's "load more" has no durable-fallback protection,
  * unlike the homepage's initial load) shows a plain retry message rather
  * than silently doing nothing; scrolling back into view tries again since
- * the sentinel is never removed from the DOM on failure. */
+ * the sentinel is never removed from the DOM on failure. Capped at
+ * LOAD_MORE_TIMEOUT_MS via AbortController so a truly unresponsive origin
+ * (not just a slow ~30s cold start, which this comfortably outlasts) doesn't
+ * leave the reader staring at "Loading more articles…" indefinitely — the
+ * fetch itself has no built-in timeout otherwise. */
 export const INFINITE_SCROLL_CLIENT_SCRIPT = `(function () {
   var list = document.getElementById('article-list');
   var sentinel = document.getElementById('infinite-scroll-sentinel');
   if (!list || !sentinel) return;
 
+  var LOAD_MORE_TIMEOUT_MS = 35000;
   var loading = false;
 
   function setMessage(text) {
@@ -31,8 +36,18 @@ export const INFINITE_SCROLL_CLIENT_SCRIPT = `(function () {
     loading = true;
     setMessage('Loading more articles…');
 
-    fetch('/partials/articles?after=' + encodeURIComponent(sentinel.dataset.nextCursor || ''))
+    var controller = new AbortController();
+    var timedOut = false;
+    var timeoutId = setTimeout(function () {
+      timedOut = true;
+      controller.abort();
+    }, LOAD_MORE_TIMEOUT_MS);
+
+    fetch('/partials/articles?after=' + encodeURIComponent(sentinel.dataset.nextCursor || ''), {
+      signal: controller.signal,
+    })
       .then(function (response) {
+        clearTimeout(timeoutId);
         if (!response.ok) throw new Error('load-more request failed');
         return response.text();
       })
@@ -58,7 +73,12 @@ export const INFINITE_SCROLL_CLIENT_SCRIPT = `(function () {
         }
       })
       .catch(function () {
-        setMessage("Couldn't load more articles. Scroll to try again.");
+        clearTimeout(timeoutId);
+        setMessage(
+          timedOut
+            ? "Taking too long to load more articles. Scroll to try again."
+            : "Couldn't load more articles. Scroll to try again.",
+        );
         loading = false;
       });
   }
