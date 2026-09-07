@@ -219,7 +219,7 @@ async function revalidate(env: Env, pathname: string, key: Request): Promise<voi
 const LIST_PATH = '/articles';
 const FALLBACK_KV_KEY = 'latest-10';
 const FALLBACK_SIZE = 10;
-const ORIGIN_TIMEOUT_MS = 5000;
+const ORIGIN_TIMEOUT_MS = 2000;
 
 async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<void> {
   const articles = (await listResponse.json()) as Article[];
