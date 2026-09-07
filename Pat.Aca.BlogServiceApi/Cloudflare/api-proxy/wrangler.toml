@@ -13,3 +13,10 @@ compatibility_date = "2026-08-25"
 #   wrangler secret put ARTICLES_API_KEY
 [vars]
 API_BASE_URL = "https://blog-service-api.whitewater-2e220d9b.westeurope.azurecontainerapps.io"
+
+# Durable (global, not per-colo like the Cache API) fallback store for the
+# latest-10 article list — see the "Durable list fallback" section in
+# src/index.ts.
+[[kv_namespaces]]
+binding = "ARTICLES_FALLBACK"
+id = "7de6876ca4354e2986728cc321cccbbc"

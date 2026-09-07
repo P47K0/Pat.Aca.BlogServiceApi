@@ -7,6 +7,9 @@ export interface Env {
   /** Shared secret sent as X-Api-Key to the API's article endpoints. Set via
    * `wrangler secret put ARTICLES_API_KEY` — never checked into wrangler.toml. */
   ARTICLES_API_KEY: string;
+  /** Durable (not per-colo, unlike the Cache API below) fallback store for
+   * just the latest-10 article list — see the fallback section below. */
+  ARTICLES_FALLBACK: KVNamespace;
 }
 
 // Must match Pat.Aca.BlogServiceApi's ApiSecurity.ApiKeyHeaderName exactly.
@@ -184,15 +187,116 @@ async function fetchAndRender(env: Env, pathname: string): Promise<UpstreamResul
 async function revalidate(env: Env, pathname: string, key: Request): Promise<void> {
   const { response, cacheable } = await fetchAndRender(env, pathname);
   if (cacheable) {
+    // Snapshot from a clone *before* cache.put() gets the original — put()
+    // consumes the response body, so cloning after would be too late.
+    if (pathname === LIST_PATH) {
+      await writeFallbackSnapshot(env, response.clone());
+    }
     await cache.put(key, response);
   }
+}
+
+// --- Durable list fallback --------------------------------------------------
+//
+// The Cache API above is per-colo and can be empty for a route even on a
+// long-lived site — a colo that just hasn't seen traffic for it, or an entry
+// Cloudflare evicted. On that cold miss, the code below used to fall straight
+// through to a synchronous origin fetch with nothing to serve — fine for a
+// merely slow cold start (~30s, measured), but the visitor pays every second
+// of it. This durable, non-per-colo fallback (Cloudflare KV — global reads,
+// no colo blind spots) exists specifically to cover that gap for the article
+// LIST route only: whenever a full list fetch from origin succeeds, the 10
+// newest articles' list metadata (no `content` — the list view never needs
+// it, and there's no reason to multiply origin load fetching bodies nobody
+// may click) get written here. If a live origin fetch for the list is slow
+// past ORIGIN_TIMEOUT_MS or fails outright, this snapshot is served instead.
+//
+// Deliberately NOT extended to the article detail route (GET /articles/{slug})
+// — the existing per-route Cache API SWR caching there already does exactly
+// what's wanted (serve-if-cached, background-refresh, synchronous-fetch-on-
+// true-cold-miss); opening an article that isn't already cached from a real
+// prior visit still waits on origin, unchanged, by design.
+const LIST_PATH = '/articles';
+const FALLBACK_KV_KEY = 'latest-10';
+const FALLBACK_SIZE = 10;
+const ORIGIN_TIMEOUT_MS = 2000;
+
+async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<void> {
+  const articles = (await listResponse.json()) as Article[];
+  const latest = [...articles]
+    .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+    .slice(0, FALLBACK_SIZE)
+    .map((article) => ({ ...article, content: '' }));
+  await env.ARTICLES_FALLBACK.put(FALLBACK_KV_KEY, JSON.stringify(latest));
+}
+
+async function readFallbackSnapshot(env: Env): Promise<Response | null> {
+  const stored = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
+  if (!stored) return null;
+  return new Response(stored, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+  });
+}
+
+/** Cold-miss handling for the list route only: races the real origin fetch
+ * against ORIGIN_TIMEOUT_MS. If origin wins, behaves exactly like the normal
+ * path (render, cache, snapshot). If the timeout wins — or the fetch throws —
+ * and a durable snapshot exists, that's served immediately while the real
+ * fetch keeps running in the background (still updating the Cache API entry
+ * and the snapshot whenever it does eventually resolve). If there's no
+ * snapshot yet (e.g. very first request ever), this just falls back to
+ * waiting on origin, same as before this feature existed. */
+async function fetchListWithFallback(
+  env: Env,
+  ctx: ExecutionContext,
+  key: Request,
+): Promise<Response> {
+  const originPromise = fetchAndRender(env, LIST_PATH).then(async ({ response, cacheable }) => {
+    if (cacheable) {
+      // Snapshot from clones taken while the body is still unread — both put()
+      // and the eventual `return response` each need their own intact copy.
+      await cache.put(key, response.clone());
+      await writeFallbackSnapshot(env, response.clone());
+    }
+    return response;
+  });
+
+  // Never rejects: a thrown fetch (network error, DNS failure, timeout at the
+  // platform level, etc.) becomes an 'unavailable' outcome exactly like a slow
+  // origin hitting ORIGIN_TIMEOUT_MS, so both funnel into the same fallback
+  // path below instead of throwing out of Promise.race.
+  type Outcome = { kind: 'origin'; response: Response } | { kind: 'unavailable' };
+  const settled: Promise<Outcome> = originPromise
+    .then((response): Outcome => ({ kind: 'origin', response }))
+    .catch((): Outcome => ({ kind: 'unavailable' }));
+  const timedOut: Promise<Outcome> = new Promise((resolve) => {
+    setTimeout(() => resolve({ kind: 'unavailable' }), ORIGIN_TIMEOUT_MS);
+  });
+
+  const winner = await Promise.race([settled, timedOut]);
+  if (winner.kind === 'origin') {
+    return winner.response;
+  }
+
+  // Origin is slower than we're willing to make a visitor wait for, or it
+  // failed outright — let it keep running in the background so the cache and
+  // snapshot still get updated if/when it does resolve, but don't block this
+  // response on it.
+  ctx.waitUntil(originPromise.then(() => undefined).catch(() => undefined));
+
+  const fallback = await readFallbackSnapshot(env);
+  // No snapshot yet (e.g. the very first request ever) — nothing to fall back
+  // to, so wait on origin after all, same as before this feature existed.
+  return fallback ?? originPromise;
 }
 
 /** Proxies a GET to the API with stale-while-revalidate caching: an existing
  * cache entry is always served immediately; a background refresh is kicked
  * off (not awaited) only when it's older than REVALIDATE_INTERVAL_MS. On a
  * cold cache miss, fetches synchronously (nothing to serve yet) and seeds
- * the cache for next time. */
+ * the cache for next time — except the list route, which races that fetch
+ * against a durable fallback (see fetchListWithFallback above). */
 async function proxyArticlesRequest(
   env: Env,
   ctx: ExecutionContext,
@@ -208,6 +312,10 @@ async function proxyArticlesRequest(
       ctx.waitUntil(revalidate(env, pathname, key));
     }
     return cached;
+  }
+
+  if (pathname === LIST_PATH) {
+    return fetchListWithFallback(env, ctx, key);
   }
 
   const { response, cacheable } = await fetchAndRender(env, pathname);
