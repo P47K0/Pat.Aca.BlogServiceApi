@@ -120,6 +120,40 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task POST_articles_persists_linkedin_video_embed_url()
+        {
+            var client = CreateClient("Articles.Write");
+            var request = ValidRequest("video-embed-article") with
+            {
+                LinkedinVideoEmbedUrl = "https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:1234567890?compact=1"
+            };
+
+            using var response = await client.PostAsJsonAsync("/articles", request);
+
+            var created = await response.Content.ReadFromJsonAsync<Article>();
+            Assert.NotNull(created);
+            Assert.Equal(request.LinkedinVideoEmbedUrl, created!.LinkedinVideoEmbedUrl);
+        }
+
+        [Fact]
+        public async Task PUT_articles_slug_can_add_a_linkedin_video_embed_url_to_an_existing_article()
+        {
+            var client = CreateClient("Articles.Write");
+            await client.PostAsJsonAsync("/articles", ValidRequest("video-embed-added-later"));
+
+            using var response = await client.PutAsJsonAsync(
+                "/articles/video-embed-added-later",
+                ValidRequest("video-embed-added-later") with
+                {
+                    LinkedinVideoEmbedUrl = "https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:1234567890?compact=1"
+                });
+
+            var updated = await response.Content.ReadFromJsonAsync<Article>();
+            Assert.NotNull(updated);
+            Assert.Equal("https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:1234567890?compact=1", updated!.LinkedinVideoEmbedUrl);
+        }
+
+        [Fact]
         public async Task PUT_articles_slug_updates_and_preserves_view_count()
         {
             var client = CreateClient("Articles.Write");

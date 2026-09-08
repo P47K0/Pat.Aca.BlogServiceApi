@@ -25,6 +25,10 @@ export interface Article {
   /** Incremented server-side by the API on every GET of this article's
    * detail page — see ArticleDetailPage for where it's shown. */
   viewCount: number;
+  /** LinkedIn's own "Embed video only" iframe src for this article's demo
+   * video, or null/undefined if it has none. A deliberate dependency on the
+   * source LinkedIn post staying up/Public — see ArticleDetailPage. */
+  linkedinVideoEmbedUrl?: string | null;
 }
 
 /** Thrown when api-proxy returns a non-2xx/404 status or the fetch itself

@@ -62,7 +62,7 @@ public sealed class FakeArticleRepository : IArticleRepository
             return Task.FromResult<Article?>(null);
         }
 
-        var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>());
+        var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>(), LinkedinVideoEmbedUrl: request.LinkedinVideoEmbedUrl);
         SeedArticles.Add(article);
         return Task.FromResult<Article?>(article);
     }
@@ -81,7 +81,8 @@ public sealed class FakeArticleRepository : IArticleRepository
             Summary = request.Summary ?? "",
             Content = request.Content,
             PublishedAt = request.PublishedAt,
-            Tags = request.Tags ?? new List<string>()
+            Tags = request.Tags ?? new List<string>(),
+            LinkedinVideoEmbedUrl = request.LinkedinVideoEmbedUrl
         };
         SeedArticles[index] = updated;
         return Task.FromResult<Article?>(updated);

@@ -14,5 +14,9 @@ namespace Pat.Aca.BlogServiceApi
         string Content,
         string? Summary = null,
         DateTime PublishedAt = default,
-        List<string>? Tags = null);
+        List<string>? Tags = null,
+        // Pass-through, same as Summary/PublishedAt/Tags — no required
+        // validation. See Article.LinkedinVideoEmbedUrl for the field's
+        // purpose/trade-off.
+        string? LinkedinVideoEmbedUrl = null);
 }
