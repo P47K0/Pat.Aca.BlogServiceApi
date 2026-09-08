@@ -312,7 +312,10 @@ namespace Pat.Aca.BlogServiceApi
                 PublishedAt = request.PublishedAt,
                 Tags = request.Tags ?? new List<string>(),
                 ViewCount = 0,
-                LinkedinVideoEmbedUrl = request.LinkedinVideoEmbedUrl
+                LinkedinVideoEmbedUrl = request.LinkedinVideoEmbedUrl,
+                SeriesName = request.SeriesName,
+                SeriesOrder = request.SeriesOrder,
+                RelatedSlugs = request.RelatedSlugs
             };
 
             ItemResponse<ArticleDocument> response = await _container.CreateItemAsync(document, new PartitionKey(document.Slug));
@@ -341,7 +344,10 @@ namespace Pat.Aca.BlogServiceApi
                 PatchOperation.Set("/content", request.Content),
                 PatchOperation.Set("/publishedAt", request.PublishedAt),
                 PatchOperation.Set("/tags", request.Tags ?? new List<string>()),
-                PatchOperation.Set("/linkedinVideoEmbedUrl", request.LinkedinVideoEmbedUrl)
+                PatchOperation.Set("/linkedinVideoEmbedUrl", request.LinkedinVideoEmbedUrl),
+                PatchOperation.Set("/seriesName", request.SeriesName),
+                PatchOperation.Set("/seriesOrder", request.SeriesOrder),
+                PatchOperation.Set("/relatedSlugs", request.RelatedSlugs)
             };
 
             ItemResponse<ArticleDocument> response = await _container.PatchItemAsync<ArticleDocument>(
@@ -357,7 +363,7 @@ namespace Pat.Aca.BlogServiceApi
             // Existing hand-authored articles keep their old (PascalCase-stored)
             // Id value untouched; it's simply never read or written by this
             // class's write methods.
-            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl);
+            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl, document.SeriesName, document.SeriesOrder, document.RelatedSlugs);
 
         /// <summary>
         /// The exact JSON shape written to/read from Cosmos by every method in
@@ -411,6 +417,15 @@ namespace Pat.Aca.BlogServiceApi
 
             [JsonProperty("linkedinVideoEmbedUrl")]
             public string? LinkedinVideoEmbedUrl { get; set; }
+
+            [JsonProperty("seriesName")]
+            public string? SeriesName { get; set; }
+
+            [JsonProperty("seriesOrder")]
+            public int? SeriesOrder { get; set; }
+
+            [JsonProperty("relatedSlugs")]
+            public List<string>? RelatedSlugs { get; set; }
         }
 
         public async Task<List<ArticleSummary>> GetRecentArticlesAsync(int count = 5)

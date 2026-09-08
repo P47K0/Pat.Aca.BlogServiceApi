@@ -154,6 +154,44 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task POST_articles_persists_series_and_related_slugs()
+        {
+            var client = CreateClient("Articles.Write");
+            var request = ValidRequest("series-article-part-1") with
+            {
+                SeriesName = "Debugging Skills",
+                SeriesOrder = 1,
+                RelatedSlugs = new List<string> { "series-article-part-2", "series-article-part-3" }
+            };
+
+            using var response = await client.PostAsJsonAsync("/articles", request);
+
+            var created = await response.Content.ReadFromJsonAsync<Article>();
+            Assert.NotNull(created);
+            Assert.Equal("Debugging Skills", created!.SeriesName);
+            Assert.Equal(1, created.SeriesOrder);
+            Assert.Equal(request.RelatedSlugs, created.RelatedSlugs);
+        }
+
+        [Fact]
+        public async Task PUT_articles_slug_can_add_related_slugs_to_an_existing_article()
+        {
+            var client = CreateClient("Articles.Write");
+            await client.PostAsJsonAsync("/articles", ValidRequest("related-slugs-added-later"));
+
+            using var response = await client.PutAsJsonAsync(
+                "/articles/related-slugs-added-later",
+                ValidRequest("related-slugs-added-later") with
+                {
+                    RelatedSlugs = new List<string> { "first-article", "second-article" }
+                });
+
+            var updated = await response.Content.ReadFromJsonAsync<Article>();
+            Assert.NotNull(updated);
+            Assert.Equal(new List<string> { "first-article", "second-article" }, updated!.RelatedSlugs);
+        }
+
+        [Fact]
         public async Task PUT_articles_slug_updates_and_preserves_view_count()
         {
             var client = CreateClient("Articles.Write");
