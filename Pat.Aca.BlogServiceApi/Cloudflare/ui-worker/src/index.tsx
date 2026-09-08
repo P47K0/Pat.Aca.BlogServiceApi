@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from './types';
 import { UpstreamError } from './types';
 import { getArticleBySlug, getArticles, getArticlesPage } from './lib/blog-client';
+import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles';
 import { escapeXml } from './lib/xml';
 import { Layout } from './components/Layout';
 import { ArticlesFragment } from './components/ArticlesFragment';
@@ -64,6 +65,17 @@ app.get('/articles/:slug', async (c) => {
   if (!article) {
     return c.notFound();
   }
+
+  // Series nav / related articles need other articles' titles, which the
+  // single-article fetch above doesn't carry (relatedSlugs is just slugs).
+  // Only fetched when this article actually references either, so the
+  // majority of articles (neither field set) still cost one fetch, same as
+  // before this feature.
+  const needsArticleList = Boolean(article.seriesName) || Boolean(article.relatedSlugs?.length);
+  const allArticles = needsArticleList ? await getArticles(c.env) : [];
+  const seriesNav = resolveSeriesNav(article, allArticles);
+  const relatedArticles = resolveRelatedArticles(article, allArticles);
+
   const canonicalUrl = `${c.env.SITE_URL}/articles/${article.slug}`;
   return c.html(
     <Layout
@@ -84,7 +96,7 @@ app.get('/articles/:slug', async (c) => {
         author: { '@type': 'Person', name: 'Patrick Koorevaar' },
       }}
     >
-      <ArticleDetailPage article={article} />
+      <ArticleDetailPage article={article} seriesNav={seriesNav} relatedArticles={relatedArticles} />
     </Layout>,
   );
 });

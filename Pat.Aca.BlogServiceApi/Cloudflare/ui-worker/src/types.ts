@@ -29,6 +29,15 @@ export interface Article {
    * video, or null/undefined if it has none. A deliberate dependency on the
    * source LinkedIn post staying up/Public — see ArticleDetailPage. */
   linkedinVideoEmbedUrl?: string | null;
+  /** Strict numbered series (e.g. "Debugging Skills" 1/2/3) — both null/
+   * undefined for an article that isn't part of one. See ArticleDetailPage
+   * for the prev/next nav this drives. */
+  seriesName?: string | null;
+  seriesOrder?: number | null;
+  /** Looser, non-ordinal cross-links to other articles by slug — resolved to
+   * full Article objects (title/date) by index.tsx before reaching
+   * ArticleDetailPage, since this field alone only carries slugs. */
+  relatedSlugs?: string[] | null;
 }
 
 /** Thrown when api-proxy returns a non-2xx/404 status or the fetch itself

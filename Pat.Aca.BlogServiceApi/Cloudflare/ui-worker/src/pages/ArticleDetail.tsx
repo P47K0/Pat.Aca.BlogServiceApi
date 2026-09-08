@@ -1,9 +1,14 @@
 import type { FC } from 'hono/jsx';
 import type { Article } from '../types';
+import type { SeriesNav } from '../lib/related-articles';
 import { TagList } from '../components/TagList';
 import { formatDate } from '../lib/format-date';
 
-export const ArticleDetailPage: FC<{ article: Article }> = ({ article }) => (
+export const ArticleDetailPage: FC<{
+  article: Article;
+  seriesNav: SeriesNav | null;
+  relatedArticles: Article[];
+}> = ({ article, seriesNav, relatedArticles }) => (
   <>
     <article class="rounded-2xl bg-white p-8 shadow-sm">
       <h1 class="text-3xl font-bold text-gray-900">{article.title}</h1>
@@ -15,6 +20,31 @@ export const ArticleDetailPage: FC<{ article: Article }> = ({ article }) => (
       {article.tags.length > 0 && (
         <div class="mt-3">
           <TagList tags={article.tags} />
+        </div>
+      )}
+      {seriesNav && (
+        <div class="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+          <p>
+            Part {seriesNav.position} of {seriesNav.total} in <span class="font-medium">{seriesNav.seriesName}</span>
+          </p>
+          {(seriesNav.prev || seriesNav.next) && (
+            <p class="mt-1 flex justify-between gap-4">
+              <span>
+                {seriesNav.prev && (
+                  <a href={`/articles/${seriesNav.prev.slug}`} class="text-blue-700 hover:text-blue-600">
+                    ← {seriesNav.prev.title}
+                  </a>
+                )}
+              </span>
+              <span class="text-right">
+                {seriesNav.next && (
+                  <a href={`/articles/${seriesNav.next.slug}`} class="text-blue-700 hover:text-blue-600">
+                    {seriesNav.next.title} →
+                  </a>
+                )}
+              </span>
+            </p>
+          )}
         </div>
       )}
       {article.linkedinVideoEmbedUrl && (
@@ -45,6 +75,24 @@ export const ArticleDetailPage: FC<{ article: Article }> = ({ article }) => (
         dangerouslySetInnerHTML={{ __html: article.content }}
       />
     </article>
+    {relatedArticles.length > 0 && (
+      <div class="mt-6 rounded-2xl bg-white p-6 shadow-sm">
+        <h2 class="text-sm font-semibold text-gray-500">Related articles</h2>
+        <ul class="mt-3 space-y-2">
+          {relatedArticles.map((related) => (
+            <li>
+              <a
+                href={`/articles/${related.slug}`}
+                class="text-gray-900 transition hover:text-blue-600"
+              >
+                {related.title}
+              </a>
+              <span class="ml-2 text-sm text-gray-500">{formatDate(related.publishedAt)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
     <a href="/" class="mt-6 block text-sm text-gray-500 transition hover:text-blue-600">
       ← All articles
     </a>
