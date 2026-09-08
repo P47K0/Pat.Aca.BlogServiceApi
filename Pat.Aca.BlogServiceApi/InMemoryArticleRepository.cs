@@ -63,7 +63,7 @@ namespace Pat.Aca.BlogServiceApi
 
             // Id dropped from the write path per the BRD (legacy, never used
             // for lookups) — new articles just get 0.
-            var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>());
+            var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>(), LinkedinVideoEmbedUrl: request.LinkedinVideoEmbedUrl);
             SeedArticles.Add(article);
             return Task.FromResult<Article?>(article);
         }
@@ -84,7 +84,8 @@ namespace Pat.Aca.BlogServiceApi
                 Summary = request.Summary ?? "",
                 Content = request.Content,
                 PublishedAt = request.PublishedAt,
-                Tags = request.Tags ?? new List<string>()
+                Tags = request.Tags ?? new List<string>(),
+                LinkedinVideoEmbedUrl = request.LinkedinVideoEmbedUrl
             };
             SeedArticles[index] = updated;
             return Task.FromResult<Article?>(updated);

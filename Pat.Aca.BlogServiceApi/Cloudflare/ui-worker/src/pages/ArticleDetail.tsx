@@ -17,6 +17,24 @@ export const ArticleDetailPage: FC<{ article: Article }> = ({ article }) => (
           <TagList tags={article.tags} />
         </div>
       )}
+      {article.linkedinVideoEmbedUrl && (
+        // LinkedIn's own "Embed video only" iframe — a deliberate dependency
+        // on that specific LinkedIn post staying up/Public (breaks silently
+        // if the user ever deletes it), accepted for the much lower effort
+        // vs. downloading and re-hosting each video the way article images
+        // are. LinkedIn's default generated code is a fixed 504x399px box;
+        // wrapped in an aspect-ratio container here instead so it scales
+        // with this site's responsive layout rather than a hardcoded size.
+        <div class="mt-6 aspect-[504/399] w-full max-w-md overflow-hidden rounded-2xl">
+          <iframe
+            src={article.linkedinVideoEmbedUrl}
+            class="h-full w-full"
+            frameborder="0"
+            allowfullscreen
+            title={`${article.title} — video demo`}
+          ></iframe>
+        </div>
+      )}
       {/* `content` is HTML rendered server-side by api-proxy from Markdown that
           the user hand-authors directly in Cosmos (never user-submitted input)
           — see blog-service-api-project memory's auth-architecture note.

@@ -93,6 +93,7 @@ interface Article {
   publishedAt: string;
   tags: string[];
   viewCount: number;
+  linkedinVideoEmbedUrl?: string | null;
 }
 
 /** Every article's Markdown source conventionally opens with a `# Title`
