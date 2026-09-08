@@ -18,5 +18,10 @@ namespace Pat.Aca.BlogServiceApi
         // Pass-through, same as Summary/PublishedAt/Tags — no required
         // validation. See Article.LinkedinVideoEmbedUrl for the field's
         // purpose/trade-off.
-        string? LinkedinVideoEmbedUrl = null);
+        string? LinkedinVideoEmbedUrl = null,
+        // Pass-through, no required validation. See Article.SeriesName/
+        // SeriesOrder/RelatedSlugs for what these mean.
+        string? SeriesName = null,
+        int? SeriesOrder = null,
+        List<string>? RelatedSlugs = null);
 }
