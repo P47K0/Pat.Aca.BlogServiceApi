@@ -7,4 +7,5 @@
   </Folder>
   <Project Path="Pat.Aca.BlogServiceApi/Pat.Aca.BlogServiceApi.csproj" />
   <Project Path="Pat.ACA.BlogServiceTests/Pat.ACA.BlogServiceApiTests.csproj" />
+  <Project Path="Pat.Aca.BlogCommentsModerationFunction/Pat.Aca.BlogCommentsModerationFunction.csproj" />
 </Solution>
