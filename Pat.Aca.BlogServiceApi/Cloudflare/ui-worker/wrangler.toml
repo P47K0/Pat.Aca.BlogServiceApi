@@ -34,7 +34,7 @@ SITE_URL = "https://blog.koorevaar.com"
 # dashboard (Turnstile section) for the blog.koorevaar.com domain, then set
 # the real site key here. The paired secret key goes in via
 # `wrangler secret put TURNSTILE_SECRET_KEY`, never here.
-TURNSTILE_SITE_KEY = ""
+TURNSTILE_SITE_KEY = "0x4AAAAAAEuW1UZyrV4YDywH"
 
 # Persists console.log/console.error output so the dashboard's Logs tab shows
 # past requests, not just a live stream started after the fact — without
