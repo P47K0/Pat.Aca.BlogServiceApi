@@ -69,10 +69,26 @@ jobs:
           # (Portal or `az functionapp config appsettings set`), not by
           # re-running this workflow.
 
-      - name: Show Function App name and managed identity principal ID
+      - name: Show Function App name, principal ID, and required manual RBAC
         shell: bash
         run: |
           set -euo pipefail
+
+          PRINCIPAL_ID=$(az deployment group show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name comments-function \
+            --query "properties.outputs.functionAppPrincipalId.value" \
+            -o tsv)
+          STORAGE_ID=$(az deployment group show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name comments-function \
+            --query "properties.outputs.storageAccountId.value" \
+            -o tsv)
+          APP_INSIGHTS_ID=$(az deployment group show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name comments-function \
+            --query "properties.outputs.applicationInsightsId.value" \
+            -o tsv)
 
           echo -n "Function App name: "
           az deployment group show \
@@ -81,12 +97,22 @@ jobs:
             --query "properties.outputs.functionAppName.value" \
             -o tsv
 
-          echo -n "Managed identity principal ID (for the Cosmos DB workflow's blogCommentsFunctionPrincipalId input): "
-          az deployment group show \
-            --resource-group "$RESOURCE_GROUP" \
-            --name comments-function \
-            --query "properties.outputs.functionAppPrincipalId.value" \
-            -o tsv
+          echo "Managed identity principal ID (for the Cosmos DB workflow's blogCommentsFunctionPrincipalId input): $PRINCIPAL_ID"
 
-          echo "::notice::Function App just created/updated — its managed identity has no Cosmos DB access yet."
-          echo "::notice::Run the 'Cosmos DB' workflow with the principal ID printed above to grant it."
+          # This workflow's own service principal deliberately does NOT have
+          # Microsoft.Authorization/roleAssignments/write (see
+          # comments-function.bicep's own comment on why that permission is
+          # kept out of automation here) -- these four assignments are
+          # applied by hand, once, using the commands below. A one-time
+          # step: the Function App's principal id is stable across future
+          # code deploys and infra re-runs, as long as the Function App
+          # itself is never deleted and recreated.
+          echo "::notice::Run these commands yourself (this workflow's identity deliberately can't run them) to finish granting the Function's managed identity what it needs:"
+          echo ""
+          echo "az role assignment create --assignee-object-id $PRINCIPAL_ID --assignee-principal-type ServicePrincipal --role \"Storage Blob Data Owner\" --scope $STORAGE_ID"
+          echo "az role assignment create --assignee-object-id $PRINCIPAL_ID --assignee-principal-type ServicePrincipal --role \"Storage Queue Data Contributor\" --scope $STORAGE_ID"
+          echo "az role assignment create --assignee-object-id $PRINCIPAL_ID --assignee-principal-type ServicePrincipal --role \"Storage Table Data Contributor\" --scope $STORAGE_ID"
+          echo "az role assignment create --assignee-object-id $PRINCIPAL_ID --assignee-principal-type ServicePrincipal --role \"Monitoring Metrics Publisher\" --scope $APP_INSIGHTS_ID"
+          echo ""
+          echo "::notice::Function App just created/updated — its managed identity has no Cosmos DB access yet either."
+          echo "::notice::Run the 'Cosmos DB' workflow with the principal ID printed above to grant that (that one Cosmos's own sqlRoleAssignments mechanism, not Microsoft.Authorization/roleAssignments, so this workflow's identity can do it)."

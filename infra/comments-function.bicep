@@ -262,62 +262,38 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
   }
 }
 
-// Deployment package storage (blob) -- Flex Consumption reads the
-// Function's code from here via the Function's own identity, per
-// functionAppConfig.deployment.storage.authentication above.
-resource storageBlobDataOwnerRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, functionApp.id, 'Storage Blob Data Owner')
-  scope: storageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
-    principalId: functionApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// Deliberately NOT assigned here: Storage Blob Data Owner (deployment
+// package)/Storage Queue+Table Data Contributor (AzureWebJobsStorage)/
+// Monitoring Metrics Publisher (App Insights AAD telemetry) all need
+// Microsoft.Authorization/roleAssignments/write -- a materially more
+// privileged permission than creating/updating resources (Contributor),
+// since it lets the holder grant access to others. Per the user's
+// explicit choice (consistent with how they handle RBAC in their other
+// projects too), the GitHub Actions service principal that runs this
+// deployment is deliberately never granted that permission -- these four
+// assignments are applied by hand instead, once, after this template
+// deploys. See comments-function-infra.yml's own final step, which
+// prints ready-to-run `az role assignment create` commands using this
+// deployment's own outputs (functionAppPrincipalId/storageAccountId/
+// applicationInsightsId below) -- copy-paste, nothing to look up by hand.
+// This is a one-time step: the Function App's identity/principal id is
+// stable across future code deploys and even future re-runs of this same
+// infra template, as long as the Function App resource itself is never
+// deleted and recreated.
 
-// AzureWebJobsStorage (queues/blobs/tables the Functions host itself
-// needs for its own bookkeeping) -- identity-based, per the
-// AzureWebJobsStorage__*ServiceUri app settings above, not a connection
-// string/shared key.
-resource storageQueueDataContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, functionApp.id, 'Storage Queue Data Contributor')
-  scope: storageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
-    principalId: functionApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource storageTableDataContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, functionApp.id, 'Storage Table Data Contributor')
-  scope: storageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
-    principalId: functionApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Lets the Function publish telemetry to Application Insights via AAD
-// (APPLICATIONINSIGHTS_AUTHENTICATION_STRING = Authorization=AAD above)
-// instead of the classic instrumentation-key/connection-string-only
-// model.
-resource monitoringMetricsPublisherRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(applicationInsights.id, functionApp.id, 'Monitoring Metrics Publisher')
-  scope: applicationInsights
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
-    principalId: functionApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Feed this into cosmos-db.bicep's blogCommentsFunctionPrincipalId param
-// on a redeploy to actually grant this Function's identity the Cosmos
-// RBAC it needs (see that template's own cosmosCommentsFunctionReader/
-// Writer/LeasesRoleAssignment resources) -- same chicken-and-egg
-// deploy-then-configure ordering blogServicePrincipalId itself needed.
+// Feed functionAppPrincipalId into cosmos-db.bicep's
+// blogCommentsFunctionPrincipalId param on a redeploy to actually grant
+// this Function's identity the Cosmos RBAC it needs (see that template's
+// own cosmosCommentsFunctionReader/Writer/LeasesRoleAssignment resources)
+// -- same chicken-and-egg deploy-then-configure ordering
+// blogServicePrincipalId itself needed. Cosmos's own sqlRoleAssignments
+// resource type is a separate, Cosmos-specific control-plane permission,
+// not Microsoft.Authorization/roleAssignments -- the same
+// already-Contributor-level access this deployment's service principal
+// has for the Cosmos account is enough for that one, which is why it
+// isn't part of the same manual-assignment carve-out as the four above.
 output functionAppPrincipalId string = functionApp.identity.principalId
 output functionAppName string = functionApp.name
 output functionAppDefaultHostname string = functionApp.properties.defaultHostName
+output storageAccountId string = storageAccount.id
+output applicationInsightsId string = applicationInsights.id
