@@ -33,5 +33,28 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         /// judgement is trusted -- see AUTO_PUBLISH_MIN_SCORE.
         /// </summary>
         public int AutoPublishMinScore { get; set; } = 6;
+
+        /// <summary>
+        /// The system-message instructions sent to the LLM alongside each
+        /// comment's raw text (as a separate user message -- see
+        /// IModerationScorer's real implementation) to produce a
+        /// ModerationScore. Kept configurable and separate from
+        /// ModerationModelId deliberately -- wording will likely need
+        /// several rounds of tuning against real comments/spam before it's
+        /// trusted enough to lower AutoPublishMinScore, and that's a much
+        /// faster iteration loop as a Function App setting (MODERATION_
+        /// SYSTEM_PROMPT) than as a code change requiring a redeploy. The
+        /// default asks for strict JSON specifically so the scorer's
+        /// response parsing doesn't have to cope with free-form prose.
+        /// </summary>
+        public string ModerationSystemPrompt { get; set; } =
+            "You are a content moderator for a personal blog's comment section. " +
+            "Given a reader's comment, score how safe it is to publish on a scale of 0 to 5: " +
+            "0 means definitely do not publish, 5 means definitely fine to publish. " +
+            "Score low for offensive, hateful, or sexual content; commercial spam or advertising; " +
+            "and low-quality garbage (gibberish, irrelevant text, or obvious bot output). " +
+            "Score high for genuine, on-topic reader engagement, even if critical or negative in tone. " +
+            "Respond with ONLY a single JSON object, no other text, in exactly this shape: " +
+            "{\"score\": <integer 0-5>, \"reason\": \"<one short sentence explaining the score>\"}";
     }
 }
