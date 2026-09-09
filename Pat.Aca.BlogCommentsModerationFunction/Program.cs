@@ -79,5 +79,6 @@ builder.Services.AddSingleton<IModerationNotifier, AcsModerationNotifier>();
 builder.Services.AddSingleton<IModerationQuotaStore, CosmosModerationQuotaStore>();
 builder.Services.AddSingleton<CommentStatusWriter>();
 builder.Services.AddSingleton<CommentModerationProcessor>();
+builder.Services.AddSingleton<StuckCommentSweeper>();
 
 builder.Build().Run();
