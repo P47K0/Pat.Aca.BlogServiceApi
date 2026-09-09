@@ -33,6 +33,13 @@ on:
           `az ad signed-in-user show --query id -o tsv`. Leave blank to skip;
           re-run later with this filled in without affecting anything else.
         required: false
+      blogCommentsFunctionPrincipalId:
+        description: >
+          Principal ID of the Comments moderation Function's system-assigned
+          managed identity. Get it from the 'Comments Function Infra'
+          workflow's output. Leave blank to skip; re-run later with this
+          filled in without affecting anything else.
+        required: false
 
 jobs:
   deploy:
@@ -61,6 +68,7 @@ jobs:
         env:
           LOCATION: ${{ inputs.location }}
           AUTHOR_PRINCIPAL_ID: ${{ inputs.blogAuthorPrincipalId }}
+          COMMENTS_FUNCTION_PRINCIPAL_ID: ${{ inputs.blogCommentsFunctionPrincipalId }}
         run: |
           set -euo pipefail
 
@@ -72,6 +80,10 @@ jobs:
           if [ -n "$AUTHOR_PRINCIPAL_ID" ]; then
             echo "Granting Data Contributor to author principal: $AUTHOR_PRINCIPAL_ID"
             params+=(blogAuthorPrincipalId="$AUTHOR_PRINCIPAL_ID")
+          fi
+          if [ -n "$COMMENTS_FUNCTION_PRINCIPAL_ID" ]; then
+            echo "Granting Comments container RBAC to the moderation Function's principal: $COMMENTS_FUNCTION_PRINCIPAL_ID"
+            params+=(blogCommentsFunctionPrincipalId="$COMMENTS_FUNCTION_PRINCIPAL_ID")
           fi
 
           az deployment group create \

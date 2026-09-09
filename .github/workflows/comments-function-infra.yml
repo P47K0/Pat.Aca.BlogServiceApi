@@ -1,0 +1,92 @@
+name: Comments Function Infra
+
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+#
+# Manual only — this provisions/updates real Azure resources (storage
+# account, Flex Consumption plan, Function App, App Insights, RBAC), so
+# it's deliberately not wired to any push trigger, same reasoning as the
+# Cosmos DB workflow.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Comments Function hosting (Bicep)
+        shell: bash
+        env:
+          COSMOS_ENDPOINT_URI: ${{ secrets.COSMOS_ENDPOINT_URI }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACS_CONNECTION_STRING: ${{ secrets.ACS_CONNECTION_STRING }}
+          ACS_SENDER_ADDRESS: ${{ vars.ACS_SENDER_ADDRESS }}
+          MODERATION_NOTIFICATION_EMAIL: ${{ vars.MODERATION_NOTIFICATION_EMAIL }}
+        run: |
+          set -euo pipefail
+
+          # Reuses the same COSMOS_ENDPOINT_URI secret already configured
+          # for the Deploy workflow — same Cosmos account, no reason for a
+          # second copy of the same value.
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/comments-function.bicep \
+            --parameters \
+              cosmosEndpointUri="$COSMOS_ENDPOINT_URI" \
+              cloudflareAccountId="$CLOUDFLARE_ACCOUNT_ID" \
+              cloudflareApiToken="$CLOUDFLARE_API_TOKEN" \
+              acsConnectionString="$ACS_CONNECTION_STRING" \
+              acsSenderAddress="$ACS_SENDER_ADDRESS" \
+              acsRecipientEmail="$MODERATION_NOTIFICATION_EMAIL"
+
+          # Moderation__ModerationModelId/DailyModerationQuota/
+          # AutoPublishMinScore/ModerationSystemPrompt are deliberately not
+          # passed here — comments-function.bicep's own defaults apply on
+          # first deploy, and per the design, tuning them afterward is
+          # meant to happen directly against the Function App's settings
+          # (Portal or `az functionapp config appsettings set`), not by
+          # re-running this workflow.
+
+      - name: Show Function App name and managed identity principal ID
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo -n "Function App name: "
+          az deployment group show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name comments-function \
+            --query "properties.outputs.functionAppName.value" \
+            -o tsv
+
+          echo -n "Managed identity principal ID (for the Cosmos DB workflow's blogCommentsFunctionPrincipalId input): "
+          az deployment group show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name comments-function \
+            --query "properties.outputs.functionAppPrincipalId.value" \
+            -o tsv
+
+          echo "::notice::Function App just created/updated — its managed identity has no Cosmos DB access yet."
+          echo "::notice::Run the 'Cosmos DB' workflow with the principal ID printed above to grant it."
