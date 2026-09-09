@@ -88,6 +88,42 @@ resource container 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/container
   }
 }
 
+// Comments container, shared throughput with Articles (same database) --
+// rides the account's existing Cosmos free tier (1000 RU/s + 25 GB) rather
+// than provisioning new dedicated capacity. Partition key is /articleSlug
+// (not /slug, to avoid colliding with Article's own partition key path
+// convention while still keying on the same logical value) since the
+// dominant read pattern is "all comments for one article".
+resource commentsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2023-11-15' = {
+  parent: database
+  name: 'Comments'
+  properties: {
+    resource: {
+      id: 'Comments'
+      partitionKey: {
+        paths: [
+          '/articleSlug'
+        ]
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          {
+            path: '/*'
+          }
+        ]
+        excludedPaths: [
+          {
+            path: '/"_etag"/?'
+          }
+        ]
+      }
+    }
+  }
+}
+
 resource cosmosReaderRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
   parent: account
   name: guid(account.id, blogServicePrincipalId, 'Cosmos DB Built-in Data Reader')
@@ -139,6 +175,46 @@ resource cosmosBlogServiceWriterRoleAssignment 'Microsoft.DocumentDB/databaseAcc
   }
 }
 
+// Comments are a public write surface (any anonymous reader can submit
+// one) -- a fundamentally different trust boundary than the AI-only
+// Articles write path above. This role is deliberately fenced to the
+// Comments container alone via a container-scoped assignableScopes: even
+// though it's assigned to the same blogServicePrincipalId managed
+// identity as cosmosBlogServiceWriterRoleAssignment, it grants zero access
+// to Articles. Starts with "create" only, matching what the public
+// POST /articles/{slug}/comments endpoint needs; "replace"/"delete" will
+// be added here (not as a new role) once the Comments.Moderate endpoints
+// and the Change-Feed moderation Function are built -- same incrementally
+// grown pattern as cosmosBlogServiceWriterRoleDefinition above.
+resource cosmosCommentsWriterRoleDefinition 'Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions@2024-05-15' = {
+  parent: account
+  name: guid(account.id, 'BlogServiceApi comments writer role')
+  properties: {
+    roleName: 'BlogServiceApi Comments Writer'
+    type: 'CustomRole'
+    assignableScopes: [
+      '${account.id}/dbs/${database.name}/colls/${commentsContainer.name}'
+    ]
+    permissions: [
+      {
+        dataActions: [
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/create'
+        ]
+      }
+    ]
+  }
+}
+
+resource cosmosCommentsWriterRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
+  parent: account
+  name: guid(account.id, blogServicePrincipalId, 'BlogServiceApi comments writer role')
+  properties: {
+    roleDefinitionId: cosmosCommentsWriterRoleDefinition.id
+    principalId: blogServicePrincipalId
+    scope: '${account.id}/dbs/${database.name}/colls/${commentsContainer.name}'
+  }
+}
+
 // Grants a human author (not the app) Data Explorer read/write, since
 // articles are authored by hand directly in Cosmos, never through the API.
 // Skipped entirely when blogAuthorPrincipalId is left blank.
@@ -155,4 +231,5 @@ resource cosmosAuthorRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRo
 output cosmosAccountName string = account.name
 output cosmosDatabaseName string = database.name
 output cosmosContainerName string = container.name
+output cosmosCommentsContainerName string = commentsContainer.name
 output cosmosEndpoint string = account.properties.documentEndpoint
