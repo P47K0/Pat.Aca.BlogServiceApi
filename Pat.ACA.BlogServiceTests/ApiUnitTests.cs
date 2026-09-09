@@ -127,6 +127,43 @@ namespace Pat.ACA.BlogServiceTests
             Assert.Equal("ip:203.0.113.5", partitionKey);
         }
 
+        // --- ApiSecurity.GetCommentsRateLimitPartitionKey ---
+
+        [Fact]
+        public void GetCommentsRateLimitPartitionKey_uses_forwarded_ip_and_route_slug_when_present()
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Request.Headers[ApiSecurity.RealClientIpHeaderName] = "198.51.100.7";
+            httpContext.Request.RouteValues["slug"] = "my-article";
+
+            var partitionKey = ApiSecurity.GetCommentsRateLimitPartitionKey(httpContext);
+
+            Assert.Equal("ip:198.51.100.7:slug:my-article", partitionKey);
+        }
+
+        [Fact]
+        public void GetCommentsRateLimitPartitionKey_falls_back_to_remote_ip_when_header_absent()
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.5");
+            httpContext.Request.RouteValues["slug"] = "my-article";
+
+            var partitionKey = ApiSecurity.GetCommentsRateLimitPartitionKey(httpContext);
+
+            Assert.Equal("ip:203.0.113.5:slug:my-article", partitionKey);
+        }
+
+        [Fact]
+        public void GetCommentsRateLimitPartitionKey_falls_back_to_unknown_slug_when_route_value_missing()
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Request.Headers[ApiSecurity.RealClientIpHeaderName] = "198.51.100.7";
+
+            var partitionKey = ApiSecurity.GetCommentsRateLimitPartitionKey(httpContext);
+
+            Assert.Equal("ip:198.51.100.7:slug:unknown", partitionKey);
+        }
+
         // --- ApiSecurity.CreateArticlesLimiterOptions ---
         // Same construction path as production, but a tiny limit and a long
         // window, so this proves the "reject beyond the limit" behavior in
@@ -291,6 +328,111 @@ namespace Pat.ACA.BlogServiceTests
             var errors = ArticleWriteValidation.Validate(request);
 
             Assert.NotEmpty(errors);
+        }
+
+        // --- CommentWriteValidation ---
+
+        private static readonly CommentSettings DefaultCommentSettings = new();
+
+        [Fact]
+        public void CommentWriteValidation_passes_for_a_fully_populated_request()
+        {
+            var request = new CommentWriteRequest("Author", "A comment.", "author@example.com");
+
+            var errors = CommentWriteValidation.Validate(request, DefaultCommentSettings);
+
+            Assert.Empty(errors);
+        }
+
+        [Fact]
+        public void CommentWriteValidation_passes_without_an_email()
+        {
+            var request = new CommentWriteRequest("Author", "A comment.");
+
+            var errors = CommentWriteValidation.Validate(request, DefaultCommentSettings);
+
+            Assert.Empty(errors);
+        }
+
+        [Theory]
+        [InlineData("", "A comment.")]
+        [InlineData("Author", "")]
+        [InlineData("   ", "A comment.")]
+        [InlineData("Author", "   ")]
+        public void CommentWriteValidation_fails_when_a_required_field_is_missing_or_blank(string authorName, string text)
+        {
+            var request = new CommentWriteRequest(authorName, text);
+
+            var errors = CommentWriteValidation.Validate(request, DefaultCommentSettings);
+
+            Assert.NotEmpty(errors);
+        }
+
+        [Fact]
+        public void CommentWriteValidation_fails_when_authorName_exceeds_the_configured_max_length()
+        {
+            var settings = new CommentSettings { MaxAuthorNameLength = 5 };
+            var request = new CommentWriteRequest("TooLongName", "A comment.");
+
+            var errors = CommentWriteValidation.Validate(request, settings);
+
+            Assert.NotEmpty(errors);
+        }
+
+        [Fact]
+        public void CommentWriteValidation_fails_when_text_exceeds_the_configured_max_length()
+        {
+            var settings = new CommentSettings { MaxTextLength = 5 };
+            var request = new CommentWriteRequest("Author", "This comment is too long.");
+
+            var errors = CommentWriteValidation.Validate(request, settings);
+
+            Assert.NotEmpty(errors);
+        }
+
+        [Theory]
+        [InlineData("not-an-email")]
+        [InlineData("missing-at-sign.com")]
+        public void CommentWriteValidation_fails_for_a_malformed_email(string email)
+        {
+            var request = new CommentWriteRequest("Author", "A comment.", email);
+
+            var errors = CommentWriteValidation.Validate(request, DefaultCommentSettings);
+
+            Assert.NotEmpty(errors);
+        }
+
+        [Fact]
+        public void CommentWriteValidation_fails_when_email_exceeds_the_configured_max_length()
+        {
+            var settings = new CommentSettings { MaxEmailLength = 10 };
+            var request = new CommentWriteRequest("Author", "A comment.", "author@example.com");
+
+            var errors = CommentWriteValidation.Validate(request, settings);
+
+            Assert.NotEmpty(errors);
+        }
+
+        [Fact]
+        public void CommentWriteValidation_Trim_trims_whitespace_and_normalizes_a_blank_email_to_null()
+        {
+            var request = new CommentWriteRequest("  Author  ", "  A comment.  ", "   ");
+
+            var trimmed = CommentWriteValidation.Trim(request);
+
+            Assert.Equal("Author", trimmed.AuthorName);
+            Assert.Equal("A comment.", trimmed.Text);
+            Assert.Null(trimmed.Email);
+        }
+
+        [Fact]
+        public void CommentWriteValidation_Trim_trims_a_provided_email()
+        {
+            var request = new CommentWriteRequest("Author", "A comment.", "  author@example.com  ");
+
+            var trimmed = CommentWriteValidation.Trim(request);
+
+            Assert.Equal("author@example.com", trimmed.Email);
         }
     }
 }

@@ -24,6 +24,17 @@ API_PROXY_BASE_URL = "https://blog-api-proxy.pkoorevaar.workers.dev"
 # links and the sitemap (see SITE_URL in types.ts for why this can't just be
 # derived from the request).
 SITE_URL = "https://blog.koorevaar.com"
+# Turnstile widget site key — public by design (embedded in the rendered
+# comment form HTML), not a secret. Empty until configured, not a
+# human-readable placeholder string — this project has already been bitten
+# once (blog-service-api's appsettings.json, 2026-08-23) by a non-empty
+# placeholder getting silently treated as "configured" instead of missing.
+# An empty site key just fails to render the widget (visible, safe) rather
+# than risking anything subtler. Create the widget in the Cloudflare
+# dashboard (Turnstile section) for the blog.koorevaar.com domain, then set
+# the real site key here. The paired secret key goes in via
+# `wrangler secret put TURNSTILE_SECRET_KEY`, never here.
+TURNSTILE_SITE_KEY = "0x4AAAAAAEuW1UZyrV4YDywH"
 
 # Persists console.log/console.error output so the dashboard's Logs tab shows
 # past requests, not just a live stream started after the fact — without
