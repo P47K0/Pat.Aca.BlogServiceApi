@@ -127,6 +127,43 @@ namespace Pat.ACA.BlogServiceTests
             Assert.Equal("ip:203.0.113.5", partitionKey);
         }
 
+        // --- ApiSecurity.GetCommentsRateLimitPartitionKey ---
+
+        [Fact]
+        public void GetCommentsRateLimitPartitionKey_uses_forwarded_ip_and_route_slug_when_present()
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Request.Headers[ApiSecurity.RealClientIpHeaderName] = "198.51.100.7";
+            httpContext.Request.RouteValues["slug"] = "my-article";
+
+            var partitionKey = ApiSecurity.GetCommentsRateLimitPartitionKey(httpContext);
+
+            Assert.Equal("ip:198.51.100.7:slug:my-article", partitionKey);
+        }
+
+        [Fact]
+        public void GetCommentsRateLimitPartitionKey_falls_back_to_remote_ip_when_header_absent()
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.5");
+            httpContext.Request.RouteValues["slug"] = "my-article";
+
+            var partitionKey = ApiSecurity.GetCommentsRateLimitPartitionKey(httpContext);
+
+            Assert.Equal("ip:203.0.113.5:slug:my-article", partitionKey);
+        }
+
+        [Fact]
+        public void GetCommentsRateLimitPartitionKey_falls_back_to_unknown_slug_when_route_value_missing()
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Request.Headers[ApiSecurity.RealClientIpHeaderName] = "198.51.100.7";
+
+            var partitionKey = ApiSecurity.GetCommentsRateLimitPartitionKey(httpContext);
+
+            Assert.Equal("ip:198.51.100.7:slug:unknown", partitionKey);
+        }
+
         // --- ApiSecurity.CreateArticlesLimiterOptions ---
         // Same construction path as production, but a tiny limit and a long
         // window, so this proves the "reject beyond the limit" behavior in

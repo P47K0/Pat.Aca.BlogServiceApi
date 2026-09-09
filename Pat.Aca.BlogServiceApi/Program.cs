@@ -17,12 +17,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 const string ArticlesWriteAuthorizationPolicy = "ArticlesWrite";
 const string ArticlesWriteRoleName = "Articles.Write";
 
+// Comments moderation (list-all/publish-unpublish/delete) is a separate app
+// role from Articles.Write — there's no admin UI for this; Claude drives it
+// directly via these endpoints when asked, using its own client-credentials
+// token. Kept as its own role rather than folded into Articles.Write since
+// the two are conceptually unrelated capabilities that happen to share a
+// caller today.
+const string CommentsModerateAuthorizationPolicy = "CommentsModerate";
+const string CommentsModerateRoleName = "Comments.Moderate";
+
 // The write endpoints require this app role on the token, not just "any
 // valid token" — deliberately structured (per the BRD) so a narrower
 // Articles.Delete role can be added later without redesigning this.
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(ArticlesWriteAuthorizationPolicy, policy => policy.RequireRole(ArticlesWriteRoleName));
+    options.AddPolicy(CommentsModerateAuthorizationPolicy, policy => policy.RequireRole(CommentsModerateRoleName));
 });
 
 // Standardizes error bodies as RFC 7807 ProblemDetails JSON. Combined with
@@ -38,18 +48,31 @@ var cosmosConfigured = cosmosDbSettings is not null
     && !string.IsNullOrWhiteSpace(cosmosDbSettings.Database)
     && !string.IsNullOrWhiteSpace(cosmosDbSettings.Container);
 
+// Comments live in the same Cosmos database as Articles (just a different
+// container — see infra/cosmos-db.bicep), so the same cosmosConfigured gate
+// and the same CosmosSettings decide which ICommentRepository to register —
+// no separate config section needed.
 if (cosmosConfigured)
 {
     builder.Services.AddSingleton(cosmosDbSettings!);
     builder.Services.AddSingleton<IArticleRepository, CosmosArticleRepository>();
+    builder.Services.AddSingleton<ICommentRepository, CosmosCommentRepository>();
 }
 else
 {
     builder.Services.AddSingleton<IArticleRepository, InMemoryArticleRepository>();
+    builder.Services.AddSingleton<ICommentRepository, InMemoryCommentRepository>();
 }
+
+// Comment length caps — plain-POCO-singleton, same convention as
+// CosmosSettings above (not IOptions<T>). A missing/incomplete "Comments"
+// config section falls back to CommentSettings' own property defaults.
+var commentSettings = builder.Configuration.GetSection("Comments").Get<CommentSettings>() ?? new CommentSettings();
+builder.Services.AddSingleton(commentSettings);
 
 const string ArticlesRateLimiterPolicy = "articles";
 const string ArticlesWriteRateLimiterPolicy = "articles-write";
+const string CommentsWriteRateLimiterPolicy = "comments-write";
 const string ApiKeyHeaderName = ApiSecurity.ApiKeyHeaderName;
 
 // Shared secret the Cloudflare Worker sends on the article endpoints' behalf.
@@ -79,6 +102,20 @@ builder.Services.AddRateLimiter(options =>
         RateLimitPartition.GetFixedWindowLimiter(
             ApiSecurity.GetWriteRateLimitPartitionKey(httpContext),
             factory: _ => ApiSecurity.CreateArticlesLimiterOptions(permitLimit: 20, window: TimeSpan.FromMinutes(1))));
+
+    // The comments write path is a public, anonymous surface (unlike every
+    // other write endpoint) — every commenter arrives via the same
+    // two-Worker chain with the same shared API key, so partitioning by key
+    // or by the Workers' own egress IP would put every commenter in one
+    // bucket. Partitioned by real visitor IP + article slug instead — see
+    // ApiSecurity.GetCommentsRateLimitPartitionKey. 2/hour caps how much a
+    // single source can drive up Cosmos RU spend or the (not yet built)
+    // moderation Function's daily LLM-usage quota on any one article,
+    // without penalizing a real reader commenting on several articles.
+    options.AddPolicy(CommentsWriteRateLimiterPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ApiSecurity.GetCommentsRateLimitPartitionKey(httpContext),
+            factory: _ => ApiSecurity.CreateArticlesLimiterOptions(permitLimit: 2, window: TimeSpan.FromHours(1))));
 });
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -104,24 +141,39 @@ builder.Services.AddOpenApi(options =>
             Type = SecuritySchemeType.Http,
             Scheme = "bearer",
             BearerFormat = "JWT",
-            Description = "Azure AD app-only token (client-credentials grant) carrying the Articles.Write app role — required for POST/PUT /articles."
+            Description = "Azure AD app-only token (client-credentials grant) carrying the Articles.Write or Comments.Moderate app role — required for POST/PUT /articles and the Comments.Moderate endpoints."
         };
 
-        // Only the article endpoints require the key — /healthz stays open.
-        var articleOperations = document.Paths
+        // Only the article/comment endpoints require the key — /healthz
+        // stays open. Kept as an explicit allow-list of which (path, verb)
+        // pairs need Bearer rather than the previous verb-only check
+        // (POST/PUT => Bearer, else => ApiKey): that stopped being enough
+        // once the Comments.Moderate endpoints joined the existing
+        // POST/PUT /articles write endpoints — GET .../comments/all and
+        // PATCH/DELETE .../comments/{commentId} are Bearer-only despite not
+        // being POST/PUT, while POST .../comments (the public submission
+        // endpoint) is API-key despite being a POST.
+        static bool RequiresBearerAuth(string path, HttpMethod method) =>
+            (path, method.Method) switch
+            {
+                ("/articles", "POST") => true,
+                ("/articles/{slug}", "PUT") => true,
+                ("/articles/{slug}/comments/all", "GET") => true,
+                ("/articles/{slug}/comments/{commentId}", "PATCH") => true,
+                ("/articles/{slug}/comments/{commentId}", "DELETE") => true,
+                _ => false
+            };
+
+        var articlePathOperations = document.Paths
             .Where(path => path.Key.StartsWith("/articles", StringComparison.Ordinal))
-            .SelectMany(path => path.Value.Operations!)
+            .SelectMany(path => path.Value.Operations!.Select(op => (Path: path.Key, Method: op.Key, Operation: op.Value)))
             .ToList();
 
-        foreach (var (operationType, operation) in articleOperations)
+        foreach (var (path, operationType, operation) in articlePathOperations)
         {
             operation.Security ??= [];
 
-            // POST/PUT are the write endpoints — Azure AD bearer auth only, no
-            // API key (that shared secret is the Cloudflare Worker's, for
-            // public reads; writes don't go through the Worker). GET stays on
-            // the API key as before.
-            if (operationType == HttpMethod.Post || operationType == HttpMethod.Put)
+            if (RequiresBearerAuth(path, operationType))
             {
                 operation.Security.Add(new()
                 {
@@ -329,6 +381,131 @@ app.MapPut("/articles/{slug}", async Task<IResult> (string slug, ArticleWriteReq
 })
     .RequireRateLimiting(ArticlesWriteRateLimiterPolicy)
     .RequireAuthorization(ArticlesWriteAuthorizationPolicy);
+
+// Comments: a public, anonymous write surface — a fundamentally different
+// trust boundary than every write endpoint above, which are all
+// AI-caller-only behind Azure AD. Submission goes through the same
+// X-Api-Key gate as the read endpoints (the Cloudflare Worker chain is
+// still the only path in) plus its own tighter, IP+slug-partitioned rate
+// limit. A comment always lands at CommentStatus.Queued — the document
+// itself is the moderation queue's "entry", picked up by a Change Feed
+// Function built in a later commit; nothing here scores or publishes it.
+
+app.MapPost("/articles/{slug}/comments", async Task<IResult> (
+    string slug,
+    CommentWriteRequest request,
+    IArticleRepository articleRepository,
+    ICommentRepository commentRepository,
+    CommentSettings commentSettings) =>
+{
+    if (string.IsNullOrEmpty(slug))
+    {
+        return Results.Problem("Invalid slug", statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    // Same future-publishedAt exclusion as every other reader-facing
+    // lookup — can't comment on an article that isn't publicly visible yet.
+    var article = await articleRepository.GetArticleBySlugAsync(slug);
+    if (article is null)
+    {
+        return Results.Problem("Article not found", statusCode: StatusCodes.Status404NotFound);
+    }
+
+    var trimmed = CommentWriteValidation.Trim(request);
+    var errors = CommentWriteValidation.Validate(trimmed, commentSettings);
+    if (errors.Count > 0)
+    {
+        return Results.Problem(string.Join(" ", errors), statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var created = await commentRepository.CreateCommentAsync(slug, trimmed);
+    return Results.Created($"/articles/{slug}/comments/{created.Id}", created);
+})
+    .RequireRateLimiting(CommentsWriteRateLimiterPolicy)
+    .AddEndpointFilter(RequireApiKey);
+
+// Public read: only ever CommentStatus.Published comments, and the
+// PublicComment projection omits Email entirely — see its own doc comment.
+// Shares the read path's ordinary rate limiter (not the tighter
+// comments-write one) since this is a read, same trust level as
+// GET /articles/{slug}.
+
+app.MapGet("/articles/{slug}/comments", async Task<IResult> (string slug, IArticleRepository articleRepository, ICommentRepository commentRepository) =>
+{
+    if (string.IsNullOrEmpty(slug))
+    {
+        return Results.Problem("Invalid slug", statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var article = await articleRepository.GetArticleBySlugAsync(slug);
+    if (article is null)
+    {
+        return Results.Problem("Article not found", statusCode: StatusCodes.Status404NotFound);
+    }
+
+    var comments = await commentRepository.GetPublishedCommentsAsync(slug);
+    return Results.Json(comments.Select(PublicComment.FromComment));
+})
+    .RequireRateLimiting(ArticlesRateLimiterPolicy)
+    .AddEndpointFilter(RequireApiKey);
+
+// Comments.Moderate endpoints: Azure AD app-only auth (same
+// client-credentials pattern as the Articles.Write endpoints above), no
+// API-key filter — there's no admin UI for this, Claude drives moderation
+// directly via these when asked. Reuses the write path's own rate limiter
+// (ArticlesWriteRateLimiterPolicy) rather than a new near-duplicate policy
+// — same caller/trust level as the Articles.Write endpoints.
+
+app.MapGet("/articles/{slug}/comments/all", async Task<IResult> (string slug, ICommentRepository commentRepository) =>
+{
+    if (string.IsNullOrEmpty(slug))
+    {
+        return Results.Problem("Invalid slug", statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    // Every status, including Email — never exposed by the public
+    // GET above, only through this AAD-gated endpoint.
+    var comments = await commentRepository.GetAllCommentsAsync(slug);
+    return Results.Json(comments);
+})
+    .RequireRateLimiting(ArticlesWriteRateLimiterPolicy)
+    .RequireAuthorization(CommentsModerateAuthorizationPolicy);
+
+app.MapPatch("/articles/{slug}/comments/{commentId}", async Task<IResult> (string slug, string commentId, CommentStatusUpdateRequest request, ICommentRepository commentRepository) =>
+{
+    if (request.Status is not (CommentStatus.Published or CommentStatus.Unpublished))
+    {
+        return Results.Problem(
+            $"status must be '{CommentStatus.Published}' or '{CommentStatus.Unpublished}'.",
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var updated = await commentRepository.UpdateCommentStatusAsync(slug, commentId, request.Status);
+    if (updated is null)
+    {
+        return Results.Problem("Comment not found", statusCode: StatusCodes.Status404NotFound);
+    }
+
+    return Results.Json(updated);
+})
+    .RequireRateLimiting(ArticlesWriteRateLimiterPolicy)
+    .RequireAuthorization(CommentsModerateAuthorizationPolicy);
+
+app.MapDelete("/articles/{slug}/comments/{commentId}", async Task<IResult> (string slug, string commentId, ICommentRepository commentRepository) =>
+{
+    // A real hard delete — the one case this container's data is ever
+    // actually removed rather than just marked Unpublished. Deliberate and
+    // human-directed only; nothing automated calls this.
+    var deleted = await commentRepository.DeleteCommentAsync(slug, commentId);
+    if (!deleted)
+    {
+        return Results.Problem("Comment not found", statusCode: StatusCodes.Status404NotFound);
+    }
+
+    return Results.NoContent();
+})
+    .RequireRateLimiting(ArticlesWriteRateLimiterPolicy)
+    .RequireAuthorization(CommentsModerateAuthorizationPolicy);
 
 app.Run();
 

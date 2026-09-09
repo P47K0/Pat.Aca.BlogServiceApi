@@ -66,9 +66,49 @@ namespace Pat.Aca.BlogServiceApi
         }
 
         /// <summary>
+        /// Header a trusted upstream Worker sets to the real visitor IP
+        /// (sourced from Cloudflare's own edge-set, client-unforgeable
+        /// CF-Connecting-IP), forwarded through both Workers to this API.
+        /// Needed specifically for the comments write path: unlike the read
+        /// path (where partitioning by the shared API key is correct, since
+        /// the Worker really is the one caller), every commenter arrives via
+        /// the same two-Worker chain with the same shared key, so
+        /// GetRateLimitPartitionKey's key-based partitioning would put every
+        /// commenter in the same bucket. Falls back to RemoteIpAddress (the
+        /// Worker's own egress) if this header is absent — e.g. a direct
+        /// call that skips the Workers entirely, which still has to pass
+        /// RequireApiKey first regardless of what this header says.
+        /// </summary>
+        public const string RealClientIpHeaderName = "X-Real-Client-Ip";
+
+        /// <summary>
+        /// Partitions the comments-write rate limit by real visitor IP
+        /// *and* article slug — tighter than a flat per-IP limit, so a
+        /// genuine reader commenting on several different articles isn't
+        /// penalized for it, while still capping how much a single source
+        /// can drive up Cosmos RU spend or the moderation Function's daily
+        /// LLM-usage quota on any one article.
+        /// </summary>
+        public static string GetCommentsRateLimitPartitionKey(HttpContext httpContext)
+        {
+            var clientIp = httpContext.Request.Headers.TryGetValue(RealClientIpHeaderName, out var forwardedIp) && !string.IsNullOrEmpty(forwardedIp)
+                ? forwardedIp.ToString()
+                : httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+            var articleSlug = httpContext.Request.RouteValues.TryGetValue("slug", out var slugValue) && slugValue is not null
+                ? slugValue.ToString()
+                : "unknown";
+
+            return $"ip:{clientIp}:slug:{articleSlug}";
+        }
+
+        /// <summary>
         /// Builds the fixed-window options for the articles rate-limit policy.
         /// Parameterized so tests can exercise the exact same construction path
-        /// with a small limit instead of waiting on the real one.
+        /// with a small limit instead of waiting on the real one. Reused as-is
+        /// for the comments-write policy too — the shape (fixed window, oldest-
+        /// first queue processing, no queueing) is generic, not article-specific
+        /// despite the name.
         /// </summary>
         public static FixedWindowRateLimiterOptions CreateArticlesLimiterOptions(int permitLimit, TimeSpan window) => new()
         {
