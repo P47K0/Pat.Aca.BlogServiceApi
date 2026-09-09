@@ -181,11 +181,20 @@ resource cosmosBlogServiceWriterRoleAssignment 'Microsoft.DocumentDB/databaseAcc
 // Comments container alone via a container-scoped assignableScopes: even
 // though it's assigned to the same blogServicePrincipalId managed
 // identity as cosmosBlogServiceWriterRoleAssignment, it grants zero access
-// to Articles. Starts with "create" only, matching what the public
-// POST /articles/{slug}/comments endpoint needs; "replace"/"delete" will
-// be added here (not as a new role) once the Comments.Moderate endpoints
-// and the Change-Feed moderation Function are built -- same incrementally
-// grown pattern as cosmosBlogServiceWriterRoleDefinition above.
+// to Articles. Read access for the Comments container comes from the
+// existing account-wide cosmosReaderRoleAssignment above (Cosmos DB
+// Built-in Data Reader is scoped to the whole account, not just
+// Articles) -- this role is purely additive for the writes that role
+// doesn't cover. Started with "create" only (for the public
+// POST /articles/{slug}/comments endpoint); "replace"/"delete" added
+// here once the Comments.Moderate endpoints (PATCH to flip
+// published/unpublished, DELETE to hard-delete spam) were built --
+// same incrementally-grown pattern as cosmosBlogServiceWriterRoleDefinition
+// above. Still missing the same capability the Change-Feed moderation
+// Function will need once it exists: that Function runs under its own
+// managed identity, not blogServicePrincipalId, so it'll need its own
+// role assignment against this same role definition, not a change to
+// this permissions list.
 resource cosmosCommentsWriterRoleDefinition 'Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions@2024-05-15' = {
   parent: account
   name: guid(account.id, 'BlogServiceApi comments writer role')
@@ -199,6 +208,8 @@ resource cosmosCommentsWriterRoleDefinition 'Microsoft.DocumentDB/databaseAccoun
       {
         dataActions: [
           'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/create'
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/replace'
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/delete'
         ]
       }
     ]
