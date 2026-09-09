@@ -1,14 +1,19 @@
 import type { FC } from 'hono/jsx';
-import type { Article } from '../types';
+import type { Article, PublicComment } from '../types';
 import type { SeriesNav } from '../lib/related-articles';
 import { TagList } from '../components/TagList';
+import { CommentSection } from '../components/CommentSection';
 import { formatDate } from '../lib/format-date';
 
 export const ArticleDetailPage: FC<{
   article: Article;
   seriesNav: SeriesNav | null;
   relatedArticles: Article[];
-}> = ({ article, seriesNav, relatedArticles }) => (
+  comments: PublicComment[];
+  turnstileSiteKey: string;
+  commentStatus?: 'success' | 'error';
+  commentMessage?: string;
+}> = ({ article, seriesNav, relatedArticles, comments, turnstileSiteKey, commentStatus, commentMessage }) => (
   <>
     <article class="rounded-2xl bg-white p-8 shadow-sm">
       <h1 class="text-3xl font-bold text-gray-900">{article.title}</h1>
@@ -93,6 +98,12 @@ export const ArticleDetailPage: FC<{
         </ul>
       </div>
     )}
+    <CommentSection
+      comments={comments}
+      turnstileSiteKey={turnstileSiteKey}
+      status={commentStatus}
+      message={commentMessage}
+    />
     <a href="/" class="mt-6 block text-sm text-gray-500 transition hover:text-blue-600">
       ← All articles
     </a>

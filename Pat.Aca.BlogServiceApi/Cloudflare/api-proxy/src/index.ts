@@ -15,6 +15,17 @@ export interface Env {
 // Must match Pat.Aca.BlogServiceApi's ApiSecurity.ApiKeyHeaderName exactly.
 const API_KEY_HEADER = 'X-Api-Key';
 
+// Must match Pat.Aca.BlogServiceApi's ApiSecurity.RealClientIpHeaderName
+// exactly. Set by ui-worker from the *original* incoming request's
+// CF-Connecting-IP (accurate there — it's the real browser's edge
+// connection) before its own outbound fetch() to this Worker, since
+// Cloudflare doesn't carry the original CF-Connecting-IP across a
+// Worker-to-Worker hop the way it does browser-to-edge. This Worker never
+// re-derives its own CF-Connecting-IP for this purpose — it would just be
+// ui-worker's own egress at that point, not the reader's — it only relays
+// whatever ui-worker already resolved, onward to the API unchanged.
+const REAL_CLIENT_IP_HEADER = 'X-Real-Client-Ip';
+
 // ui-worker is the intended frontend, so this is scoped to its custom domain.
 // Note this is NOT access control — CORS only governs whether a *browser*
 // may read a cross-origin response; it does nothing against curl, another
@@ -22,9 +33,13 @@ const API_KEY_HEADER = 'X-Api-Key';
 // calls to this Worker are server-side, so CORS doesn't even apply to them).
 // Real restriction to ui-worker only — a shared-secret header or a Service
 // Binding — is deliberately deferred, not implemented here yet.
+//
+// POST added alongside GET/OPTIONS specifically for the comment-submission
+// route below — every other route stays GET-only, enforced in the fetch
+// handler itself, not just by what CORS happens to allow.
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': 'https://blog.koorevaar.com',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -360,6 +375,65 @@ async function proxyArticlesRequest(
 }
 
 const ARTICLE_SLUG_PATH = /^\/articles\/[^/]+$/;
+const ARTICLE_COMMENTS_PATH = /^\/articles\/[^/]+\/comments$/;
+
+// --- Comments --------------------------------------------------------------
+//
+// Unlike article reads, comments are never cached (SWR or otherwise) — a
+// reader's own freshly-submitted comment showing up promptly matters more
+// here than shaving an origin round trip off a low-traffic, highly dynamic
+// resource, and there's no cold-start-hiding motivation the way there was
+// for articles (comments aren't the thing a reader clicks straight from a
+// LinkedIn link). Both directions attach the shared ARTICLES_API_KEY, same
+// as every article request.
+
+/** GET /articles/{slug}/comments passthrough — no Markdown rendering (unlike
+ * articles' `content`, a comment's `text` is always plain text), so this
+ * just forwards the API's JSON response body/status as-is. */
+async function proxyCommentsGet(env: Env, pathname: string): Promise<Response> {
+  const upstreamUrl = new URL(pathname, env.API_BASE_URL);
+  const upstreamResponse = await fetch(upstreamUrl.toString(), {
+    method: 'GET',
+    headers: {
+      [API_KEY_HEADER]: env.ARTICLES_API_KEY,
+      Accept: 'application/json',
+    },
+  });
+
+  const headers = new Headers(upstreamResponse.headers);
+  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+    headers.set(key, value);
+  }
+  return new Response(upstreamResponse.body, { status: upstreamResponse.status, headers });
+}
+
+/** POST /articles/{slug}/comments passthrough — relays the real visitor IP
+ * (already resolved by ui-worker from the original request's
+ * CF-Connecting-IP, see REAL_CLIENT_IP_HEADER above) onward to the API
+ * unchanged, alongside the shared API key. Body is forwarded verbatim —
+ * validation (required fields, length caps) is the API's job, not this
+ * Worker's; this is purely a pass-through with the right headers attached. */
+async function proxyCommentsPost(env: Env, request: Request, pathname: string): Promise<Response> {
+  const upstreamUrl = new URL(pathname, env.API_BASE_URL);
+  const realClientIp = request.headers.get(REAL_CLIENT_IP_HEADER) ?? '';
+
+  const upstreamResponse = await fetch(upstreamUrl.toString(), {
+    method: 'POST',
+    headers: {
+      [API_KEY_HEADER]: env.ARTICLES_API_KEY,
+      [REAL_CLIENT_IP_HEADER]: realClientIp,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: await request.text(),
+  });
+
+  const headers = new Headers(upstreamResponse.headers);
+  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+    headers.set(key, value);
+  }
+  return new Response(upstreamResponse.body, { status: upstreamResponse.status, headers });
+}
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -367,11 +441,21 @@ export default {
       return new Response(null, { headers: CORS_HEADERS });
     }
 
+    const { pathname, search } = new URL(request.url);
+
+    // The one non-GET route this Worker supports — everything else stays
+    // GET-only, enforced below, not just by what CORS happens to allow.
+    if (request.method === 'POST' && ARTICLE_COMMENTS_PATH.test(pathname)) {
+      return proxyCommentsPost(env, request, pathname);
+    }
+
     if (request.method !== 'GET') {
       return new Response(null, { status: 405, headers: CORS_HEADERS });
     }
 
-    const { pathname, search } = new URL(request.url);
+    if (ARTICLE_COMMENTS_PATH.test(pathname)) {
+      return proxyCommentsGet(env, pathname);
+    }
 
     // Routes mirror the API's exactly: /articles and /articles/{slug}. Only
     // /articles ever carries a query string (?limit=&after=, infinite

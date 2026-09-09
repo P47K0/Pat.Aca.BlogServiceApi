@@ -1,4 +1,4 @@
-import type { Article, Env } from '../types';
+import type { Article, Env, PublicComment } from '../types';
 import { UpstreamError } from '../types';
 
 async function fetchFromProxy(env: Env, path: string): Promise<Response> {
@@ -57,4 +57,70 @@ export async function getArticleBySlug(env: Env, slug: string): Promise<Article 
     throw new UpstreamError(`GET /articles/${slug} failed with status ${response.status}`);
   }
   return response.json();
+}
+
+/** Fetches an article's published comments. Unlike every other fetch in
+ * this file, a failure here returns an empty list rather than throwing —
+ * comments are supplementary to the article itself (same "a side effect
+ * that isn't the primary content shouldn't break the page" reasoning as
+ * the API's own best-effort view-count increment), so a comments-service
+ * hiccup shouldn't turn a successful article load into a 502 error page. */
+export async function getComments(env: Env, slug: string): Promise<PublicComment[]> {
+  try {
+    const response = await fetchFromProxy(env, `/articles/${encodeURIComponent(slug)}/comments`);
+    if (!response.ok) {
+      return [];
+    }
+    return await response.json();
+  } catch {
+    return [];
+  }
+}
+
+export interface CommentSubmission {
+  authorName: string;
+  text: string;
+  email?: string;
+}
+
+export type PostCommentResult =
+  | { ok: true }
+  | { ok: false; status: number; message: string };
+
+/** Submits a new comment via api-proxy. clientIp is the real visitor IP
+ * (already resolved by the caller from the incoming request's
+ * CF-Connecting-IP — see index.tsx's POST handler), forwarded as
+ * X-Real-Client-Ip so blog-service-api's per-IP+slug rate limiter sees the
+ * actual reader, not this Worker's own egress. */
+export async function postComment(
+  env: Env,
+  slug: string,
+  clientIp: string,
+  submission: CommentSubmission,
+): Promise<PostCommentResult> {
+  const url = new URL(`/articles/${encodeURIComponent(slug)}/comments`, env.API_PROXY_BASE_URL);
+  const response = await fetch(url.toString(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Real-Client-Ip': clientIp,
+    },
+    body: JSON.stringify(submission),
+  });
+
+  if (response.status === 201) {
+    return { ok: true };
+  }
+
+  // The API returns RFC 7807 problem+json for every error status here
+  // (400 validation, 404 unknown article, 429 rate-limited) — `detail`
+  // carries the human-readable reason; fall back to a generic message if
+  // the body isn't shaped as expected for any reason.
+  const problem = await response.json().catch(() => null) as { detail?: string; title?: string } | null;
+  const message =
+    response.status === 429
+      ? "You're commenting a bit too quickly — please wait a while and try again."
+      : problem?.detail || problem?.title || 'Something went wrong submitting your comment. Please try again later.';
+
+  return { ok: false, status: response.status, message };
 }

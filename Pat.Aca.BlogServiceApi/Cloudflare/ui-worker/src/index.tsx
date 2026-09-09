@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import type { Env } from './types';
 import { UpstreamError } from './types';
-import { getArticleBySlug, getArticles, getArticlesPage } from './lib/blog-client';
+import { getArticleBySlug, getArticles, getArticlesPage, getComments, postComment } from './lib/blog-client';
 import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles';
+import { verifyTurnstile } from './lib/turnstile';
 import { escapeXml } from './lib/xml';
 import { Layout } from './components/Layout';
 import { ArticlesFragment } from './components/ArticlesFragment';
@@ -75,6 +76,14 @@ app.get('/articles/:slug', async (c) => {
   const allArticles = needsArticleList ? await getArticles(c.env) : [];
   const seriesNav = resolveSeriesNav(article, allArticles);
   const relatedArticles = resolveRelatedArticles(article, allArticles);
+  const comments = await getComments(c.env, article.slug);
+
+  // Set only right after the POST handler below redirects back here — a
+  // one-time flash message via query string, not page state, so a plain
+  // refresh doesn't keep re-showing it (unlike re-rendering directly from
+  // the POST handler would).
+  const commentStatus = c.req.query('comment');
+  const commentMessage = c.req.query('message');
 
   const canonicalUrl = `${c.env.SITE_URL}/articles/${article.slug}`;
   return c.html(
@@ -96,9 +105,59 @@ app.get('/articles/:slug', async (c) => {
         author: { '@type': 'Person', name: 'Patrick Koorevaar' },
       }}
     >
-      <ArticleDetailPage article={article} seriesNav={seriesNav} relatedArticles={relatedArticles} />
+      <ArticleDetailPage
+        article={article}
+        seriesNav={seriesNav}
+        relatedArticles={relatedArticles}
+        comments={comments}
+        turnstileSiteKey={c.env.TURNSTILE_SITE_KEY}
+        commentStatus={commentStatus === 'success' || commentStatus === 'error' ? commentStatus : undefined}
+        commentMessage={commentMessage}
+      />
     </Layout>,
   );
+});
+
+// The comment form (CommentSection.tsx) posts here as a plain HTML form
+// submission, not fetch/AJAX — a classic POST-redirect-GET flow (303, not a
+// direct re-render) specifically so refreshing the result page never
+// resubmits the comment. Turnstile is verified here, server-side, before
+// the submission ever reaches api-proxy/blog-service-api — the widget
+// itself only proves a browser solved the challenge, this call is what
+// actually confirms that with Cloudflare.
+app.post('/articles/:slug/comments', async (c) => {
+  const slug = c.req.param('slug');
+  const formData = await c.req.formData();
+  const authorName = String(formData.get('authorName') ?? '').trim();
+  const text = String(formData.get('text') ?? '').trim();
+  const email = String(formData.get('email') ?? '').trim();
+  const turnstileToken = String(formData.get('cf-turnstile-response') ?? '');
+
+  // The real visitor IP — accurate here since this is the original
+  // browser-to-edge hop, unlike a later Worker-to-Worker fetch (see
+  // api-proxy's REAL_CLIENT_IP_HEADER doc comment for why that distinction
+  // matters). Used both for Turnstile's own remoteip cross-check and
+  // forwarded via postComment as X-Real-Client-Ip for the API's rate limiter.
+  const clientIp = c.req.header('CF-Connecting-IP') ?? '';
+
+  const redirectTo = (status: 'success' | 'error', message?: string) => {
+    const params = new URLSearchParams({ comment: status });
+    if (message) params.set('message', message);
+    return c.redirect(`/articles/${encodeURIComponent(slug)}?${params.toString()}`, 303);
+  };
+
+  const turnstileOk = await verifyTurnstile(c.env.TURNSTILE_SECRET_KEY, turnstileToken, clientIp);
+  if (!turnstileOk) {
+    return redirectTo('error', 'Verification failed — please try again.');
+  }
+
+  const result = await postComment(c.env, slug, clientIp, {
+    authorName,
+    text,
+    email: email || undefined,
+  });
+
+  return result.ok ? redirectTo('success') : redirectTo('error', result.message);
 });
 
 // Not indexed: transient error/not-found responses, never real content.

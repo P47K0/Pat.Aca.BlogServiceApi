@@ -7,6 +7,24 @@ export interface Env {
    * the incoming request alone since Cloudflare's edge may see a different
    * Host header than the public-facing domain. */
   SITE_URL: string;
+  /** Turnstile widget site key — public by design (embedded in the rendered
+   * HTML), not a secret. Plain [vars] entry. */
+  TURNSTILE_SITE_KEY: string;
+  /** Turnstile secret key, used server-side to verify a submitted token via
+   * Cloudflare's siteverify endpoint. Set via `wrangler secret put
+   * TURNSTILE_SECRET_KEY` — never checked into wrangler.toml. */
+  TURNSTILE_SECRET_KEY: string;
+}
+
+/** Shape returned by api-proxy's GET /articles/{slug}/comments — mirrors
+ * Pat.Aca.BlogServiceApi's PublicComment exactly: no email/status/llmScore
+ * (never meant for public consumption), no articleSlug (implied by the
+ * page it's rendered on). */
+export interface PublicComment {
+  id: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
 }
 
 /** Shape returned by the api-proxy Worker's GET /articles and
