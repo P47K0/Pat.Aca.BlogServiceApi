@@ -1,5 +1,4 @@
 using System.Net;
-using Azure.Identity;
 using Microsoft.Azure.Cosmos;
 using Newtonsoft.Json;
 
@@ -21,15 +20,18 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// read-then-write, so two comments scored at nearly the same moment
     /// can't both slip past the quota by racing a read.
     ///
-    /// Connection/auth logic (emulator cert bypass, Gateway mode,
-    /// DefaultAzureCredential) is a third copy of the same ~25 lines
-    /// already duplicated between CosmosArticleRepository and
-    /// CosmosCommentRepository in the sibling API project -- flagged there
-    /// as "worth extracting if a third consumer ever needs it", and here
-    /// it is. Not extracted in this commit (would mean touching two
-    /// already-committed classes as a side effect of adding the quota
-    /// store) -- a real candidate for a dedicated simplify pass once the
-    /// whole feature is stable, not mid-build.
+    /// Takes the Comments Container directly (built once in Program.cs and
+    /// shared with CommentStatusWriter) rather than building its own
+    /// CosmosClient -- the connection/auth bootstrap (emulator cert
+    /// bypass, Gateway mode, DefaultAzureCredential) was originally
+    /// duplicated here as a third copy of the same ~25 lines already in
+    /// CosmosArticleRepository/CosmosCommentRepository in the sibling API
+    /// project; consolidated to one construction site within this project
+    /// once a second consumer (CommentStatusWriter) needed the same
+    /// Container, rather than repeating it a fourth time. A cross-project
+    /// shared library covering the API project's own two copies too was
+    /// explicitly discussed and deferred -- this is a smaller,
+    /// same-project-only tidy-up, not that larger extraction.
     ///
     /// Not directly unit tested, consistent with this project's existing
     /// practice for its other real Cosmos-calling classes
@@ -42,50 +44,15 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// </summary>
     public sealed class CosmosModerationQuotaStore : IModerationQuotaStore
     {
-        private const string CommentsContainerId = "Comments";
         private const string QuotaPartitionKeyValue = "__quota__";
 
         private readonly Container _container;
         private readonly ModerationSettings _moderationSettings;
 
-        public CosmosModerationQuotaStore(CosmosSettings cosmosSettings, ModerationSettings moderationSettings)
+        public CosmosModerationQuotaStore(Container commentsContainer, ModerationSettings moderationSettings)
         {
+            _container = commentsContainer;
             _moderationSettings = moderationSettings;
-
-            var clientOptions = new CosmosClientOptions();
-            CosmosClient cosmosClient;
-
-            if (!string.IsNullOrEmpty(cosmosSettings.PrimaryKey))
-            {
-                var isLocalEmulator = Uri.TryCreate(cosmosSettings.EndpointUri, UriKind.Absolute, out var endpoint)
-                    && endpoint.IsLoopback;
-
-                if (isLocalEmulator)
-                {
-                    clientOptions.HttpClientFactory = () => new HttpClient(new HttpClientHandler
-                    {
-                        ServerCertificateCustomValidationCallback =
-                            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-                    });
-                    clientOptions.ConnectionMode = ConnectionMode.Gateway;
-                }
-
-                cosmosClient = new CosmosClient(cosmosSettings.EndpointUri, cosmosSettings.PrimaryKey, clientOptions);
-            }
-            else
-            {
-                // Direct mode needs a wide outbound TCP port range that
-                // restricted container networking doesn't reliably support
-                // -- same reasoning as the sibling API project's repositories.
-                clientOptions.ConnectionMode = ConnectionMode.Gateway;
-
-                cosmosClient = new CosmosClient(
-                    accountEndpoint: cosmosSettings.EndpointUri,
-                    tokenCredential: new DefaultAzureCredential(),
-                    clientOptions: clientOptions);
-            }
-
-            _container = cosmosClient.GetDatabase(cosmosSettings.Database).GetContainer(CommentsContainerId);
         }
 
         public async Task<bool> TryConsumeAsync()
