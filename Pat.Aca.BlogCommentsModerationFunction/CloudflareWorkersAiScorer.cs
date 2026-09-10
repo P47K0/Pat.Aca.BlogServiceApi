@@ -64,7 +64,24 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                     {
                         new { role = "system", content = _moderationSettings.ModerationSystemPrompt },
                         new { role = "user", content = commentText }
-                    }
+                    },
+                    // Belt and suspenders against a real production
+                    // incident (2026-09-10): without an explicit cap,
+                    // Workers AI's own default for this model cut
+                    // generation off well before the closing brace of even
+                    // the tiny {"score": N, "reason": "..."} shape the
+                    // prompt asks for -- a raw response of exactly
+                    // {"score": 3, "reason": "Low" with no closing quote/
+                    // brace, which ParseModelResponseText correctly failed
+                    // safe on, but at the cost of a real score (3) being
+                    // silently downgraded to the fail-safe 0. This cap and
+                    // ModerationSettings.ModerationSystemPrompt's own
+                    // explicit word/token-budget instructions are two
+                    // separate defenses against the same failure mode: the
+                    // prompt keeps the model from trying to write a long
+                    // response in the first place, this is the hard ceiling
+                    // in case it ignores that anyway.
+                    max_tokens = 200
                 })
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _cloudflareSettings.ApiToken);
