@@ -117,6 +117,46 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
         }
 
         [Fact]
+        public async Task ProcessAsync_releases_the_quota_slot_when_scoring_fails()
+        {
+            var quotaStore = new FakeModerationQuotaStore();
+            var scorer = new FakeModerationScorer(new ModerationScoringException("Cloudflare Workers AI returned 401 Unauthorized."));
+            var notifier = new FakeModerationNotifier();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+
+            await Assert.ThrowsAsync<ModerationScoringException>(() => processor.ProcessAsync(SampleComment()));
+
+            Assert.Equal(1, quotaStore.CallCount);
+            Assert.Equal(1, quotaStore.ReleaseCallCount);
+        }
+
+        [Fact]
+        public async Task ProcessAsync_does_not_release_the_quota_slot_when_scoring_succeeds()
+        {
+            var quotaStore = new FakeModerationQuotaStore();
+            var scorer = new FakeModerationScorer(new ModerationScore(5, "Fine."));
+            var notifier = new FakeModerationNotifier();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+
+            await processor.ProcessAsync(SampleComment());
+
+            Assert.Equal(0, quotaStore.ReleaseCallCount);
+        }
+
+        [Fact]
+        public async Task ProcessAsync_does_not_notify_when_scoring_fails()
+        {
+            var quotaStore = new FakeModerationQuotaStore();
+            var scorer = new FakeModerationScorer(new ModerationScoringException("Failed to reach Cloudflare Workers AI."));
+            var notifier = new FakeModerationNotifier();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+
+            await Assert.ThrowsAsync<ModerationScoringException>(() => processor.ProcessAsync(SampleComment()));
+
+            Assert.Empty(notifier.Notifications);
+        }
+
+        [Fact]
         public async Task ProcessAsync_passes_the_comment_text_to_the_scorer()
         {
             var quotaStore = new FakeModerationQuotaStore();

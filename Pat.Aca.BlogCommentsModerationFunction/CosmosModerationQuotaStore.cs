@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Azure.Cosmos;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
 namespace Pat.Aca.BlogCommentsModerationFunction
@@ -18,7 +19,12 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// The increment itself is a single atomic, conditional Cosmos Patch
     /// (PatchItemRequestOptions.FilterPredicate) rather than a
     /// read-then-write, so two comments scored at nearly the same moment
-    /// can't both slip past the quota by racing a read.
+    /// can't both slip past the quota by racing a read. ReleaseAsync is the
+    /// same idea running backwards (a conditional decrement, floored at 0)
+    /// -- CommentModerationProcessor calls it to give back a slot when the
+    /// scoring attempt it was reserved for fails, so a run of infra
+    /// failures doesn't silently burn the whole day's quota on comments
+    /// that never actually got moderated.
     ///
     /// Takes the Comments Container directly (built once in Program.cs and
     /// shared with CommentStatusWriter) rather than building its own
@@ -48,11 +54,16 @@ namespace Pat.Aca.BlogCommentsModerationFunction
 
         private readonly Container _container;
         private readonly ModerationSettings _moderationSettings;
+        private readonly ILogger<CosmosModerationQuotaStore> _logger;
 
-        public CosmosModerationQuotaStore(Container commentsContainer, ModerationSettings moderationSettings)
+        public CosmosModerationQuotaStore(
+            Container commentsContainer,
+            ModerationSettings moderationSettings,
+            ILogger<CosmosModerationQuotaStore> logger)
         {
             _container = commentsContainer;
             _moderationSettings = moderationSettings;
+            _logger = logger;
         }
 
         public async Task<bool> TryConsumeAsync()
@@ -74,6 +85,38 @@ namespace Pat.Aca.BlogCommentsModerationFunction
             {
                 // First call of a new UTC day -- today's document doesn't exist yet.
                 return await TryCreateTodaysDocumentAsync(docId, partitionKey);
+            }
+        }
+
+        public async Task ReleaseAsync()
+        {
+            var docId = TodaysQuotaDocumentId();
+            var partitionKey = new PartitionKey(QuotaPartitionKeyValue);
+
+            try
+            {
+                await _container.PatchItemAsync<QuotaDocument>(
+                    docId,
+                    partitionKey,
+                    new[] { PatchOperation.Increment("/count", -1) },
+                    new PatchItemRequestOptions
+                    {
+                        FilterPredicate = "FROM c WHERE c.count > 0"
+                    });
+            }
+            catch (CosmosException ex) when (ex.StatusCode is HttpStatusCode.PreconditionFailed or HttpStatusCode.NotFound)
+            {
+                // Nothing sensible to release: either today's document
+                // doesn't exist yet (shouldn't happen -- TryConsumeAsync
+                // always creates it first) or count is already 0 (a UTC day
+                // boundary crossed between the consume and this release).
+                // Either way this is a best-effort compensating action, not
+                // a correctness-critical one -- see ReleaseAsync's own doc
+                // comment on IModerationQuotaStore.
+                _logger.LogWarning(
+                    ex,
+                    "Could not release a quota slot for {DocId} -- leaving today's count as-is.",
+                    docId);
             }
         }
 

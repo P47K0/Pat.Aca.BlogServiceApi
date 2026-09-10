@@ -38,9 +38,10 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// (Cloudflare down, or quota exhausted for the rest of the day),
     /// wasting Cosmos RU/Function executions the whole time. Both cases
     /// just log and leave the comment at Queued; recovering a
-    /// stuck-Queued comment once conditions improve is left to a future,
-    /// separate periodic-sweep piece (a Timer-triggered Function), not
-    /// built yet -- flagged as a known, deliberate gap, not an oversight.
+    /// stuck-Queued comment once conditions improve is left to the
+    /// separate periodic-sweep piece (StuckCommentSweeper/
+    /// CommentSweepFunction, a Timer-triggered Function that re-touches
+    /// anything still Queued past a grace period) rather than done here.
     /// </summary>
     public sealed class CommentModerationFunction
     {
@@ -86,7 +87,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                 {
                     _logger.LogWarning(
                         ex,
-                        "Moderation scoring failed for comment {CommentId} on article {ArticleSlug} -- leaving it Queued. A periodic sweep is needed to recover it; not built yet.",
+                        "Moderation scoring failed for comment {CommentId} on article {ArticleSlug} -- leaving it Queued. The periodic sweep will recover it on its next run.",
                         change.Id,
                         change.ArticleSlug);
                     continue;
@@ -95,7 +96,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                 if (result is null)
                 {
                     _logger.LogInformation(
-                        "Daily moderation quota exhausted -- comment {CommentId} on article {ArticleSlug} stays Queued until a periodic sweep recovers it (not built yet).",
+                        "Daily moderation quota exhausted -- comment {CommentId} on article {ArticleSlug} stays Queued until the periodic sweep recovers it, on or after the next UTC day.",
                         change.Id,
                         change.ArticleSlug);
                     continue;
