@@ -4,11 +4,20 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
 {
     public sealed class FakeModerationScorer : IModerationScorer
     {
-        private readonly ModerationScore _score;
+        private readonly ModerationScore? _score;
+        private readonly Exception? _exceptionToThrow;
 
         public FakeModerationScorer(ModerationScore score)
         {
             _score = score;
+        }
+
+        // For tests exercising CommentModerationProcessor's quota-release
+        // behavior on a scoring failure -- see ReleaseAsync's doc comment
+        // on IModerationQuotaStore for why that matters.
+        public FakeModerationScorer(Exception exceptionToThrow)
+        {
+            _exceptionToThrow = exceptionToThrow;
         }
 
         public string? LastScoredText { get; private set; }
@@ -16,7 +25,9 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
         public Task<ModerationScore> ScoreAsync(string commentText)
         {
             LastScoredText = commentText;
-            return Task.FromResult(_score);
+            return _exceptionToThrow is not null
+                ? Task.FromException<ModerationScore>(_exceptionToThrow)
+                : Task.FromResult(_score!);
         }
     }
 }

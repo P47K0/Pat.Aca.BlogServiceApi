@@ -13,10 +13,18 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
 
         public int CallCount { get; private set; }
 
+        public int ReleaseCallCount { get; private set; }
+
         public Task<bool> TryConsumeAsync()
         {
             CallCount++;
             return Task.FromResult(_hasQuotaRemaining);
+        }
+
+        public Task ReleaseAsync()
+        {
+            ReleaseCallCount++;
+            return Task.CompletedTask;
         }
     }
 }

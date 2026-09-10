@@ -10,13 +10,18 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// same reasoning as ApiSecurity/ArticleWriteValidation being pulled out
     /// of Program.cs in the sibling API project.
     ///
+    /// The quota slot is claimed before scoring (so a comment never even
+    /// reaches the scorer once today's quota is genuinely exhausted), but
+    /// given back via IModerationQuotaStore.ReleaseAsync if the scoring
+    /// call itself fails -- a slot is only meant to represent a real,
+    /// successful moderation, not a wasted attempt.
+    ///
     /// Error handling note: a IModerationScorer/IModerationNotifier failure
-    /// is allowed to propagate out of ProcessAsync rather than being
-    /// swallowed here -- the actual Cosmos-trigger Function (a later
-    /// commit, once this is wired to a real Change Feed trigger) decides
-    /// whether to catch/log and leave the comment Queued for a later run,
-    /// or let the Functions host's own retry behavior handle it. Not
-    /// decided yet, deliberately deferred to when that wiring exists.
+    /// is allowed to propagate out of ProcessAsync (after the quota release
+    /// above) rather than being swallowed here -- the actual Cosmos-trigger
+    /// Function decides whether to catch/log and leave the comment Queued
+    /// for a later run, or let the Functions host's own retry behavior
+    /// handle it.
     /// </summary>
     public sealed class CommentModerationProcessor
     {
@@ -51,7 +56,25 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                 return null;
             }
 
-            var score = await _scorer.ScoreAsync(comment.Text);
+            ModerationScore score;
+            try
+            {
+                score = await _scorer.ScoreAsync(comment.Text);
+            }
+            catch
+            {
+                // The quota slot claimed above was for an attempt that
+                // never actually moderated anything -- give it back before
+                // letting the failure propagate (see
+                // IModerationQuotaStore.ReleaseAsync's own doc comment for
+                // why this matters: a real production incident on
+                // 2026-09-10 had a persistent scoring failure silently
+                // exhaust the entire day's quota with zero comments ever
+                // actually scored).
+                await _quotaStore.ReleaseAsync();
+                throw;
+            }
+
             var autoPublished = score.Score >= _settings.AutoPublishMinScore;
             var status = autoPublished ? ModerationCommentStatus.Published : ModerationCommentStatus.Unpublished;
 
