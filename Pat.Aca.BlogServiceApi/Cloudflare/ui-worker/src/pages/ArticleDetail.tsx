@@ -99,6 +99,7 @@ export const ArticleDetailPage: FC<{
       </div>
     )}
     <CommentSection
+      articleSlug={article.slug}
       comments={comments}
       turnstileSiteKey={turnstileSiteKey}
       status={commentStatus}
