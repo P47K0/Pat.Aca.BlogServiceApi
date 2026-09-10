@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Env } from './types';
 import { UpstreamError } from './types';
 import { getArticleBySlug, getArticles, getArticlesPage, getComments, postComment } from './lib/blog-client';
@@ -14,6 +15,16 @@ import { NotFoundPage } from './pages/NotFound';
 import { ErrorPage } from './pages/ErrorPage';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// A one-time flash message for the comment form's POST-redirect-GET flow
+// (see the POST handler below) -- a short-lived cookie, not a query-string
+// param like `?comment=success`. A query-string flash has no way to ever
+// get removed from the address bar on its own, so refreshing the page kept
+// re-showing "Thanks for your comment..." indefinitely (a real bug, caught
+// in production). The cookie is set right before redirecting and deleted
+// the moment it's read on the next request, so a refresh after that always
+// sees a clean state -- and the visible URL never carries the flash at all.
+const COMMENT_FLASH_COOKIE = 'comment_flash';
 
 // Fixed site-level description for pages that aren't about one article (home,
 // 404, error) — there's no per-site "tagline" field anywhere to derive this
@@ -78,12 +89,26 @@ app.get('/articles/:slug', async (c) => {
   const relatedArticles = resolveRelatedArticles(article, allArticles);
   const comments = await getComments(c.env, article.slug);
 
-  // Set only right after the POST handler below redirects back here — a
-  // one-time flash message via query string, not page state, so a plain
-  // refresh doesn't keep re-showing it (unlike re-rendering directly from
-  // the POST handler would).
-  const commentStatus = c.req.query('comment');
-  const commentMessage = c.req.query('message');
+  // Read-and-clear: set only right after the POST handler below redirects
+  // back here. Deleting it immediately (not just letting maxAge expire)
+  // means a refresh a second later — well within the cookie's own
+  // maxAge — still correctly shows nothing, since this request already
+  // consumed it.
+  let commentStatus: 'success' | 'error' | undefined;
+  let commentMessage: string | undefined;
+  const flashCookie = getCookie(c, COMMENT_FLASH_COOKIE);
+  if (flashCookie) {
+    try {
+      const flash = JSON.parse(flashCookie) as { status?: string; message?: string };
+      if (flash.status === 'success' || flash.status === 'error') {
+        commentStatus = flash.status;
+        commentMessage = flash.message;
+      }
+    } catch {
+      // Malformed/tampered cookie value -- ignore it, just show no banner.
+    }
+    deleteCookie(c, COMMENT_FLASH_COOKIE, { path: '/' });
+  }
 
   const canonicalUrl = `${c.env.SITE_URL}/articles/${article.slug}`;
   return c.html(
@@ -111,7 +136,7 @@ app.get('/articles/:slug', async (c) => {
         relatedArticles={relatedArticles}
         comments={comments}
         turnstileSiteKey={c.env.TURNSTILE_SITE_KEY}
-        commentStatus={commentStatus === 'success' || commentStatus === 'error' ? commentStatus : undefined}
+        commentStatus={commentStatus}
         commentMessage={commentMessage}
       />
     </Layout>,
@@ -141,9 +166,14 @@ app.post('/articles/:slug/comments', async (c) => {
   const clientIp = c.req.header('CF-Connecting-IP') ?? '';
 
   const redirectTo = (status: 'success' | 'error', message?: string) => {
-    const params = new URLSearchParams({ comment: status });
-    if (message) params.set('message', message);
-    return c.redirect(`/articles/${encodeURIComponent(slug)}?${params.toString()}`, 303);
+    setCookie(c, COMMENT_FLASH_COOKIE, JSON.stringify({ status, message }), {
+      maxAge: 10,
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+    });
+    return c.redirect(`/articles/${encodeURIComponent(slug)}`, 303);
   };
 
   const turnstileOk = await verifyTurnstile(c.env.TURNSTILE_SECRET_KEY, turnstileToken, clientIp);
