@@ -21,11 +21,12 @@ const MAX_EMAIL_LENGTH = 254;
  * which this component renders as a banner — see this component's `status`
  * prop. */
 export const CommentSection: FC<{
+  articleSlug: string;
   comments: PublicComment[];
   turnstileSiteKey: string;
   status?: 'success' | 'error';
   message?: string;
-}> = ({ comments, turnstileSiteKey, status, message }) => (
+}> = ({ articleSlug, comments, turnstileSiteKey, status, message }) => (
   <div class="mt-6 rounded-2xl bg-white p-6 shadow-sm">
     <h2 class="text-lg font-semibold text-gray-900">
       Comments{comments.length > 0 && ` (${comments.length})`}
@@ -56,7 +57,12 @@ export const CommentSection: FC<{
       </p>
     )}
 
-    <form method="post" class="mt-6 space-y-3">
+    {/* action is required -- without it, a browser submits to the current
+        page's own URL (GET-only), not this route, and 404s. Caught in
+        production, not by the earlier "real" local test, which posted to
+        the comments route directly via curl and never actually rendered
+        and submitted the HTML form itself. */}
+    <form method="post" action={`/articles/${encodeURIComponent(articleSlug)}/comments`} class="mt-6 space-y-3">
       <div>
         <label for="authorName" class="block text-sm font-medium text-gray-700">
           Name
