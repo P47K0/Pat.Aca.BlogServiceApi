@@ -118,6 +118,27 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
         }
 
         [Fact]
+        public async Task ScoreAsync_caps_max_tokens_so_the_response_cannot_be_truncated_mid_json()
+        {
+            // Regression test for a real production incident (2026-09-10):
+            // without an explicit cap, Workers AI's own default cut the
+            // model's response off mid-JSON ({"score": 3, "reason": "Low"
+            // with no closing quote/brace), which correctly failed safe to
+            // score 0 -- but at the cost of silently downgrading a real
+            // score of 3 down to 0.
+            var handler = new FakeHttpMessageHandler(
+                HttpStatusCode.OK,
+                "{\"result\": {\"response\": \"{\\\"score\\\": 5, \\\"reason\\\": \\\"Fine.\\\"}\"}, \"success\": true}");
+            var httpClient = new HttpClient(handler);
+            var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), new ModerationSettings());
+
+            await scorer.ScoreAsync("A comment.");
+
+            Assert.NotNull(handler.LastRequestBody);
+            Assert.Contains("max_tokens", handler.LastRequestBody);
+        }
+
+        [Fact]
         public async Task ScoreAsync_returns_the_parsed_score_on_success()
         {
             var handler = new FakeHttpMessageHandler(
