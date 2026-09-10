@@ -42,6 +42,21 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
         }
 
         [Fact]
+        public void ParseModelResponseText_parses_a_score_returned_as_a_quoted_string()
+        {
+            // Regression test for a real production incident (2026-09-10):
+            // an otherwise well-formed, non-truncated response of
+            // {"score": "1", "reason": "..."} still failed to parse and
+            // fell through to the fail-safe score of 0, purely because the
+            // model quoted the number despite the prompt asking for a bare
+            // integer.
+            var score = CloudflareWorkersAiScorer.ParseModelResponseText("{\"score\": \"3\", \"reason\": \"Borderline.\"}");
+
+            Assert.Equal(3, score.Score);
+            Assert.Equal("Borderline.", score.Reason);
+        }
+
+        [Fact]
         public void ParseModelResponseText_fails_safe_to_zero_for_malformed_json()
         {
             var score = CloudflareWorkersAiScorer.ParseModelResponseText("not json at all");

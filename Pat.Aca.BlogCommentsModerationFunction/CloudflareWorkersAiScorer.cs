@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Pat.Aca.BlogCommentsModerationFunction
 {
@@ -35,7 +36,16 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     {
         private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new()
         {
-            PropertyNameCaseInsensitive = true
+            PropertyNameCaseInsensitive = true,
+            // The model sometimes returns the score as a quoted string
+            // ({"score": "1", ...}) instead of a bare number ({"score": 1,
+            // ...}) despite the prompt asking for an integer -- confirmed
+            // in production 2026-09-10 with an otherwise well-formed,
+            // non-truncated response that still failed to parse and fell
+            // through to the fail-safe score of 0 purely because of the
+            // quotes. AllowReadingFromString accepts both forms; it doesn't
+            // change how a genuinely numeric value is read.
+            NumberHandling = JsonNumberHandling.AllowReadingFromString
         };
 
         private readonly HttpClient _httpClient;
