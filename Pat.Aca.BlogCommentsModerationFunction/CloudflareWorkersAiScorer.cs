@@ -11,7 +11,10 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// {AccountId}/ai/run/{ModerationModelId}) -- no Cloudflare SDK needed,
     /// this works the same from anywhere, not just from inside a Worker.
     /// ModerationSettings.ModerationSystemPrompt is sent as the system
-    /// message, the comment's raw text as a separate user message.
+    /// message. The user message is the comment's raw text alone when no
+    /// article summary is available, or the summary followed by the
+    /// comment when it is -- see IArticleContextProvider's own doc comment
+    /// for why the model needs that to judge "on-topic" at all.
     ///
     /// Two distinct failure modes, handled differently on purpose:
     /// - Genuine infrastructure failure (can't reach Cloudflare, non-success
@@ -62,9 +65,17 @@ namespace Pat.Aca.BlogCommentsModerationFunction
             _moderationSettings = moderationSettings;
         }
 
-        public async Task<ModerationScore> ScoreAsync(string commentText)
+        public async Task<ModerationScore> ScoreAsync(string commentText, string? articleSummary)
         {
             var requestUrl = $"https://api.cloudflare.com/client/v4/accounts/{_cloudflareSettings.AccountId}/ai/run/{_moderationSettings.ModerationModelId}";
+
+            // Falls back to the comment alone when the lookup failed or the
+            // article has no summary -- see IArticleContextProvider's own
+            // doc comment on why this is best-effort, never a hard
+            // dependency of scoring itself.
+            var userMessageContent = string.IsNullOrWhiteSpace(articleSummary)
+                ? commentText
+                : $"Article summary: {articleSummary}\n\nReader comment: {commentText}";
 
             using var request = new HttpRequestMessage(HttpMethod.Post, requestUrl)
             {
@@ -73,7 +84,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                     messages = new[]
                     {
                         new { role = "system", content = _moderationSettings.ModerationSystemPrompt },
-                        new { role = "user", content = commentText }
+                        new { role = "user", content = userMessageContent }
                     },
                     // Belt and suspenders against a real production
                     // incident (2026-09-10): without an explicit cap,

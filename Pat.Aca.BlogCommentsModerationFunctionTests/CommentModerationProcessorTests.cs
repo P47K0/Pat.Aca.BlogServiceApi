@@ -14,7 +14,8 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore(hasQuotaRemaining: false);
             var scorer = new FakeModerationScorer(new ModerationScore(5, "Fine."));
             var notifier = new FakeModerationNotifier();
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+            var articleContext = new FakeArticleContextProvider();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
 
             var result = await processor.ProcessAsync(SampleComment());
 
@@ -27,7 +28,8 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore(hasQuotaRemaining: false);
             var scorer = new FakeModerationScorer(new ModerationScore(5, "Fine."));
             var notifier = new FakeModerationNotifier();
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+            var articleContext = new FakeArticleContextProvider();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
 
             await processor.ProcessAsync(SampleComment());
 
@@ -36,13 +38,28 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
         }
 
         [Fact]
+        public async Task ProcessAsync_does_not_look_up_article_context_when_quota_exhausted()
+        {
+            var quotaStore = new FakeModerationQuotaStore(hasQuotaRemaining: false);
+            var scorer = new FakeModerationScorer(new ModerationScore(5, "Fine."));
+            var notifier = new FakeModerationNotifier();
+            var articleContext = new FakeArticleContextProvider("A summary.");
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
+
+            await processor.ProcessAsync(SampleComment());
+
+            Assert.Null(articleContext.LastRequestedSlug);
+        }
+
+        [Fact]
         public async Task ProcessAsync_unpublishes_when_score_is_below_the_auto_publish_threshold()
         {
             var quotaStore = new FakeModerationQuotaStore();
             var scorer = new FakeModerationScorer(new ModerationScore(3, "Borderline."));
             var notifier = new FakeModerationNotifier();
+            var articleContext = new FakeArticleContextProvider();
             var settings = new ModerationSettings { AutoPublishMinScore = 4 };
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, settings);
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, settings);
 
             var result = await processor.ProcessAsync(SampleComment());
 
@@ -57,8 +74,9 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore();
             var scorer = new FakeModerationScorer(new ModerationScore(4, "Looks fine."));
             var notifier = new FakeModerationNotifier();
+            var articleContext = new FakeArticleContextProvider();
             var settings = new ModerationSettings { AutoPublishMinScore = 4 };
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, settings);
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, settings);
 
             var result = await processor.ProcessAsync(SampleComment());
 
@@ -75,7 +93,8 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore();
             var scorer = new FakeModerationScorer(new ModerationScore(5, "Perfectly fine."));
             var notifier = new FakeModerationNotifier();
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+            var articleContext = new FakeArticleContextProvider();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
 
             var result = await processor.ProcessAsync(SampleComment());
 
@@ -89,8 +108,9 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore();
             var scorer = new FakeModerationScorer(new ModerationScore(5, "Great comment."));
             var notifier = new FakeModerationNotifier();
+            var articleContext = new FakeArticleContextProvider();
             var settings = new ModerationSettings { AutoPublishMinScore = 4 };
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, settings);
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, settings);
 
             await processor.ProcessAsync(SampleComment(email: "alice@example.com"));
 
@@ -107,7 +127,8 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore();
             var scorer = new FakeModerationScorer(new ModerationScore(2, "Looks spammy."));
             var notifier = new FakeModerationNotifier();
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+            var articleContext = new FakeArticleContextProvider();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
 
             await processor.ProcessAsync(SampleComment());
 
@@ -122,7 +143,8 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore();
             var scorer = new FakeModerationScorer(new ModerationScoringException("Cloudflare Workers AI returned 401 Unauthorized."));
             var notifier = new FakeModerationNotifier();
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+            var articleContext = new FakeArticleContextProvider();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
 
             await Assert.ThrowsAsync<ModerationScoringException>(() => processor.ProcessAsync(SampleComment()));
 
@@ -136,7 +158,8 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore();
             var scorer = new FakeModerationScorer(new ModerationScore(5, "Fine."));
             var notifier = new FakeModerationNotifier();
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+            var articleContext = new FakeArticleContextProvider();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
 
             await processor.ProcessAsync(SampleComment());
 
@@ -149,7 +172,8 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore();
             var scorer = new FakeModerationScorer(new ModerationScoringException("Failed to reach Cloudflare Workers AI."));
             var notifier = new FakeModerationNotifier();
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+            var articleContext = new FakeArticleContextProvider();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
 
             await Assert.ThrowsAsync<ModerationScoringException>(() => processor.ProcessAsync(SampleComment()));
 
@@ -162,11 +186,60 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var quotaStore = new FakeModerationQuotaStore();
             var scorer = new FakeModerationScorer(new ModerationScore(5, "Fine."));
             var notifier = new FakeModerationNotifier();
-            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, new ModerationSettings());
+            var articleContext = new FakeArticleContextProvider();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
 
             await processor.ProcessAsync(SampleComment());
 
             Assert.Equal("A perfectly nice comment.", scorer.LastScoredText);
+        }
+
+        [Fact]
+        public async Task ProcessAsync_passes_the_looked_up_article_summary_to_the_scorer()
+        {
+            var quotaStore = new FakeModerationQuotaStore();
+            var scorer = new FakeModerationScorer(new ModerationScore(5, "Fine."));
+            var notifier = new FakeModerationNotifier();
+            var articleContext = new FakeArticleContextProvider("How the blog's comment system works.");
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
+
+            await processor.ProcessAsync(SampleComment());
+
+            Assert.Equal("How the blog's comment system works.", scorer.LastArticleSummary);
+        }
+
+        [Fact]
+        public async Task ProcessAsync_looks_up_article_context_by_the_comments_article_slug()
+        {
+            var quotaStore = new FakeModerationQuotaStore();
+            var scorer = new FakeModerationScorer(new ModerationScore(5, "Fine."));
+            var notifier = new FakeModerationNotifier();
+            var articleContext = new FakeArticleContextProvider("A summary.");
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
+
+            await processor.ProcessAsync(SampleComment());
+
+            Assert.Equal("first-article", articleContext.LastRequestedSlug);
+        }
+
+        [Fact]
+        public async Task ProcessAsync_still_scores_when_article_context_lookup_returns_null()
+        {
+            // FakeArticleContextProvider's default (no summary passed)
+            // mirrors CosmosArticleContextProvider's real best-effort
+            // failure mode -- a missing/failed lookup must never block
+            // moderation, only fall back to scoring on the comment text
+            // alone (see IArticleContextProvider's own doc comment).
+            var quotaStore = new FakeModerationQuotaStore();
+            var scorer = new FakeModerationScorer(new ModerationScore(4, "Fine, no context needed."));
+            var notifier = new FakeModerationNotifier();
+            var articleContext = new FakeArticleContextProvider();
+            var processor = new CommentModerationProcessor(quotaStore, scorer, notifier, articleContext, new ModerationSettings());
+
+            var result = await processor.ProcessAsync(SampleComment());
+
+            Assert.NotNull(result);
+            Assert.Null(scorer.LastArticleSummary);
         }
     }
 }

@@ -22,9 +22,12 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
 
         public string? LastScoredText { get; private set; }
 
-        public Task<ModerationScore> ScoreAsync(string commentText)
+        public string? LastArticleSummary { get; private set; }
+
+        public Task<ModerationScore> ScoreAsync(string commentText, string? articleSummary)
         {
             LastScoredText = commentText;
+            LastArticleSummary = articleSummary;
             return _exceptionToThrow is not null
                 ? Task.FromException<ModerationScore>(_exceptionToThrow)
                 : Task.FromResult(_score!);
