@@ -69,13 +69,21 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         {
             var requestUrl = $"https://api.cloudflare.com/client/v4/accounts/{_cloudflareSettings.AccountId}/ai/run/{_moderationSettings.ModerationModelId}";
 
-            // Falls back to the comment alone when the lookup failed or the
+            // Loud, explicit labels matching ModerationSettings.
+            // ModerationSystemPrompt's own ARTICLE_SUMMARY/COMMENT_TO_SCORE
+            // wording -- a real production incident (2026-09-11) showed a
+            // softer "Article summary: ...\n\nReader comment: ..." framing
+            // wasn't enough for this small model: it ended up critiquing
+            // the article's own quality instead of judging whether the
+            // comment was safe to publish, the exact opposite of the
+            // article-context feature's purpose. Falls back to the comment
+            // alone (no labels at all) when the lookup failed or the
             // article has no summary -- see IArticleContextProvider's own
             // doc comment on why this is best-effort, never a hard
             // dependency of scoring itself.
             var userMessageContent = string.IsNullOrWhiteSpace(articleSummary)
                 ? commentText
-                : $"Article summary: {articleSummary}\n\nReader comment: {commentText}";
+                : $"ARTICLE_SUMMARY: {articleSummary}\n\nCOMMENT_TO_SCORE: {commentText}";
 
             using var request = new HttpRequestMessage(HttpMethod.Post, requestUrl)
             {
