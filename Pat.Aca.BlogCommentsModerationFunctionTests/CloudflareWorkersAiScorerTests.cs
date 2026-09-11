@@ -175,16 +175,22 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             // Mirrors IArticleContextProvider's best-effort contract -- a
             // failed/missing lookup (null) must still let scoring proceed
             // on the comment text alone, not omit the user message or fail.
+            // Uses a marker system prompt rather than the real default --
+            // that default legitimately mentions "ARTICLE_SUMMARY" as label
+            // documentation, so asserting against the whole request body
+            // would give a false positive regardless of what the *user*
+            // message actually contains.
             var handler = new FakeHttpMessageHandler(
                 HttpStatusCode.OK,
                 "{\"result\": {\"response\": \"{\\\"score\\\": 5, \\\"reason\\\": \\\"Fine.\\\"}\"}, \"success\": true}");
             var httpClient = new HttpClient(handler);
-            var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), new ModerationSettings());
+            var moderationSettings = new ModerationSettings { ModerationSystemPrompt = "SYSTEM_PROMPT_MARKER" };
+            var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), moderationSettings);
 
             await scorer.ScoreAsync("A comment.", null);
 
             Assert.NotNull(handler.LastRequestBody);
-            Assert.DoesNotContain("Article summary", handler.LastRequestBody);
+            Assert.DoesNotContain("ARTICLE_SUMMARY", handler.LastRequestBody);
         }
 
         [Fact]
