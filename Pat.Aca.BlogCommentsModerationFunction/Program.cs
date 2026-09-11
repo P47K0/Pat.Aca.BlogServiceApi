@@ -8,6 +8,7 @@ using Microsoft.Azure.Functions.Worker.OpenTelemetry;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using Pat.Aca.BlogCommentsModerationFunction;
 
@@ -71,6 +72,16 @@ else
 
 var commentsContainer = cosmosClient.GetDatabase(cosmosSettings.Database).GetContainer("Comments");
 builder.Services.AddSingleton(commentsContainer);
+
+// Not registered as a bare Container singleton -- DI can't disambiguate
+// two singletons of the same type by name, and commentsContainer above
+// already claims that slot for CosmosModerationQuotaStore/
+// CommentStatusWriter. Captured via closure in a factory instead, so
+// CosmosArticleContextProvider gets the right Container without any risk
+// of the two accidentally swapping.
+var articlesContainer = cosmosClient.GetDatabase(cosmosSettings.Database).GetContainer("Articles");
+builder.Services.AddSingleton<IArticleContextProvider>(sp =>
+    new CosmosArticleContextProvider(articlesContainer, sp.GetRequiredService<ILogger<CosmosArticleContextProvider>>()));
 
 builder.Services.AddSingleton(sp => new EmailClient(acsSettings.ConnectionString));
 

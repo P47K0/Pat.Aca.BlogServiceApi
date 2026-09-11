@@ -263,7 +263,7 @@ resource cosmosAuthorRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRo
   }
 }
 
-// The three assignments below give the Comments moderation Function's own
+// The four assignments below give the Comments moderation Function's own
 // managed identity (a separate principal from blogServicePrincipalId,
 // which these don't touch) exactly what it needs -- skipped entirely
 // until that Function exists and its principal id is known, same
@@ -271,9 +271,8 @@ resource cosmosAuthorRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRo
 
 // Read access to the Comments container specifically, not account-wide
 // like cosmosReaderRoleAssignment above -- needed to read the Change
-// Feed. Narrower than the API's own reader grant (this Function has no
-// legitimate reason to read Articles), a stricter least-privilege
-// posture than the API principal gets.
+// Feed. Narrower than the API's own reader grant, a stricter
+// least-privilege posture than the API principal gets.
 resource cosmosCommentsFunctionReaderRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(blogCommentsFunctionPrincipalId)) {
   parent: account
   name: guid(account.id, blogCommentsFunctionPrincipalId, 'Cosmos DB Built-in Data Reader', 'Comments')
@@ -281,6 +280,24 @@ resource cosmosCommentsFunctionReaderRoleAssignment 'Microsoft.DocumentDB/databa
     roleDefinitionId: resourceId('Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions', account.name, '00000000-0000-0000-0000-000000000001')
     principalId: blogCommentsFunctionPrincipalId
     scope: '${account.id}/dbs/${database.name}/colls/${commentsContainer.name}'
+  }
+}
+
+// Read-only access to the Articles container, scoped to just that
+// container -- CosmosArticleContextProvider looks up an article's summary
+// (never anything else) so the moderation LLM can judge whether a comment
+// is actually on-topic, something it can't do from the comment's own text
+// alone (see IArticleContextProvider's own doc comment). This Function
+// was originally reader-only on Comments; added once that gap was found
+// in production on 2026-09-10/11 -- still read-only, still scoped to one
+// container, same least-privilege posture as every other grant here.
+resource cosmosCommentsFunctionArticlesReaderRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(blogCommentsFunctionPrincipalId)) {
+  parent: account
+  name: guid(account.id, blogCommentsFunctionPrincipalId, 'Cosmos DB Built-in Data Reader', 'Articles')
+  properties: {
+    roleDefinitionId: resourceId('Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions', account.name, '00000000-0000-0000-0000-000000000001')
+    principalId: blogCommentsFunctionPrincipalId
+    scope: '${account.id}/dbs/${database.name}/colls/${container.name}'
   }
 }
 

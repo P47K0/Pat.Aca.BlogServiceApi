@@ -54,6 +54,9 @@ namespace Pat.Aca.BlogCommentsModerationFunction
             "Score low for offensive, hateful, or sexual content; commercial spam or advertising; " +
             "and low-quality garbage (gibberish, irrelevant text, or obvious bot output). " +
             "Score high for genuine, on-topic reader engagement, even if critical or negative in tone. " +
+            "You may be given the article's summary before the comment, for context -- use it to judge " +
+            "whether the comment is actually on-topic. If no summary is given, judge the comment on its " +
+            "own merits without penalizing it for being unable to confirm relevance to the article. " +
             "Respond with ONLY a single JSON object, no other text, in exactly this shape: " +
             "{\"score\": <integer 0-5>, \"reason\": \"<one short sentence, 12 words or fewer, explaining the score>\"}. " +
             "Keep the whole response well under 200 tokens.";

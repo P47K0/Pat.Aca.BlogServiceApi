@@ -105,7 +105,7 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var moderationSettings = new ModerationSettings { ModerationSystemPrompt = "SYSTEM_PROMPT_MARKER" };
             var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), moderationSettings);
 
-            await scorer.ScoreAsync("A comment to moderate.");
+            await scorer.ScoreAsync("A comment to moderate.", null);
 
             Assert.NotNull(handler.LastRequestBody);
             Assert.Contains("SYSTEM_PROMPT_MARKER", handler.LastRequestBody);
@@ -123,7 +123,7 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var moderationSettings = new ModerationSettings { ModerationModelId = "@cf/some/model" };
             var scorer = new CloudflareWorkersAiScorer(httpClient, cloudflareSettings, moderationSettings);
 
-            await scorer.ScoreAsync("A comment.");
+            await scorer.ScoreAsync("A comment.", null);
 
             Assert.NotNull(handler.LastRequest);
             Assert.Equal("Bearer", handler.LastRequest!.Headers.Authorization?.Scheme);
@@ -147,10 +147,44 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var httpClient = new HttpClient(handler);
             var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), new ModerationSettings());
 
-            await scorer.ScoreAsync("A comment.");
+            await scorer.ScoreAsync("A comment.", null);
 
             Assert.NotNull(handler.LastRequestBody);
             Assert.Contains("max_tokens", handler.LastRequestBody);
+        }
+
+        [Fact]
+        public async Task ScoreAsync_includes_the_article_summary_in_the_user_message_when_given()
+        {
+            var handler = new FakeHttpMessageHandler(
+                HttpStatusCode.OK,
+                "{\"result\": {\"response\": \"{\\\"score\\\": 5, \\\"reason\\\": \\\"Fine.\\\"}\"}, \"success\": true}");
+            var httpClient = new HttpClient(handler);
+            var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), new ModerationSettings());
+
+            await scorer.ScoreAsync("A comment.", "ARTICLE_SUMMARY_MARKER");
+
+            Assert.NotNull(handler.LastRequestBody);
+            Assert.Contains("ARTICLE_SUMMARY_MARKER", handler.LastRequestBody);
+            Assert.Contains("A comment.", handler.LastRequestBody);
+        }
+
+        [Fact]
+        public async Task ScoreAsync_sends_only_the_comment_when_no_article_summary_is_given()
+        {
+            // Mirrors IArticleContextProvider's best-effort contract -- a
+            // failed/missing lookup (null) must still let scoring proceed
+            // on the comment text alone, not omit the user message or fail.
+            var handler = new FakeHttpMessageHandler(
+                HttpStatusCode.OK,
+                "{\"result\": {\"response\": \"{\\\"score\\\": 5, \\\"reason\\\": \\\"Fine.\\\"}\"}, \"success\": true}");
+            var httpClient = new HttpClient(handler);
+            var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), new ModerationSettings());
+
+            await scorer.ScoreAsync("A comment.", null);
+
+            Assert.NotNull(handler.LastRequestBody);
+            Assert.DoesNotContain("Article summary", handler.LastRequestBody);
         }
 
         [Fact]
@@ -162,7 +196,7 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var httpClient = new HttpClient(handler);
             var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), new ModerationSettings());
 
-            var score = await scorer.ScoreAsync("A comment.");
+            var score = await scorer.ScoreAsync("A comment.", null);
 
             Assert.Equal(3, score.Score);
             Assert.Equal("Borderline.", score.Reason);
@@ -175,7 +209,7 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var httpClient = new HttpClient(handler);
             var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), new ModerationSettings());
 
-            await Assert.ThrowsAsync<ModerationScoringException>(() => scorer.ScoreAsync("A comment."));
+            await Assert.ThrowsAsync<ModerationScoringException>(() => scorer.ScoreAsync("A comment.", null));
         }
 
         [Fact]
@@ -187,7 +221,7 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var httpClient = new HttpClient(handler);
             var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), new ModerationSettings());
 
-            var exception = await Assert.ThrowsAsync<ModerationScoringException>(() => scorer.ScoreAsync("A comment."));
+            var exception = await Assert.ThrowsAsync<ModerationScoringException>(() => scorer.ScoreAsync("A comment.", null));
             Assert.Contains("Invalid model.", exception.Message);
         }
 
@@ -198,7 +232,7 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
             var httpClient = new HttpClient(handler);
             var scorer = new CloudflareWorkersAiScorer(httpClient, SampleCloudflareSettings(), new ModerationSettings());
 
-            await Assert.ThrowsAsync<ModerationScoringException>(() => scorer.ScoreAsync("A comment."));
+            await Assert.ThrowsAsync<ModerationScoringException>(() => scorer.ScoreAsync("A comment.", null));
         }
     }
 }

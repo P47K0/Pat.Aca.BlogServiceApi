@@ -1,14 +1,15 @@
 namespace Pat.Aca.BlogCommentsModerationFunction
 {
     /// <summary>
-    /// The pure moderation decision logic: quota check -> score -> decide
-    /// Published vs. Unpublished against AUTO_PUBLISH_MIN_SCORE -> always
-    /// notify, regardless of outcome. Deliberately has no Cosmos/HTTP
-    /// dependency of its own -- everything external is behind
-    /// IModerationQuotaStore/IModerationScorer/IModerationNotifier, so this
-    /// class (the actual interesting logic) is testable with plain fakes,
-    /// same reasoning as ApiSecurity/ArticleWriteValidation being pulled out
-    /// of Program.cs in the sibling API project.
+    /// The pure moderation decision logic: quota check -> look up article
+    /// context -> score -> decide Published vs. Unpublished against
+    /// AUTO_PUBLISH_MIN_SCORE -> always notify, regardless of outcome.
+    /// Deliberately has no Cosmos/HTTP dependency of its own -- everything
+    /// external is behind IModerationQuotaStore/IModerationScorer/
+    /// IModerationNotifier/IArticleContextProvider, so this class (the
+    /// actual interesting logic) is testable with plain fakes, same
+    /// reasoning as ApiSecurity/ArticleWriteValidation being pulled out of
+    /// Program.cs in the sibling API project.
     ///
     /// The quota slot is claimed before scoring (so a comment never even
     /// reaches the scorer once today's quota is genuinely exhausted), but
@@ -28,17 +29,20 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         private readonly IModerationQuotaStore _quotaStore;
         private readonly IModerationScorer _scorer;
         private readonly IModerationNotifier _notifier;
+        private readonly IArticleContextProvider _articleContextProvider;
         private readonly ModerationSettings _settings;
 
         public CommentModerationProcessor(
             IModerationQuotaStore quotaStore,
             IModerationScorer scorer,
             IModerationNotifier notifier,
+            IArticleContextProvider articleContextProvider,
             ModerationSettings settings)
         {
             _quotaStore = quotaStore;
             _scorer = scorer;
             _notifier = notifier;
+            _articleContextProvider = articleContextProvider;
             _settings = settings;
         }
 
@@ -56,10 +60,16 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                 return null;
             }
 
+            // Best-effort -- never throws, falls back to null (scoring on
+            // the comment text alone) on any failure. Fetched only after
+            // the quota check above succeeds, so an already-exhausted day
+            // doesn't pay for a lookup that's about to be discarded anyway.
+            var articleSummary = await _articleContextProvider.GetArticleSummaryAsync(comment.ArticleSlug);
+
             ModerationScore score;
             try
             {
-                score = await _scorer.ScoreAsync(comment.Text);
+                score = await _scorer.ScoreAsync(comment.Text, articleSummary);
             }
             catch
             {
