@@ -7,8 +7,10 @@ export interface Env {
   /** Shared secret sent as X-Api-Key to the API's article endpoints. Set via
    * `wrangler secret put ARTICLES_API_KEY` — never checked into wrangler.toml. */
   ARTICLES_API_KEY: string;
-  /** Durable (not per-colo, unlike the Cache API below) fallback store for
-   * just the latest-10 article list — see the fallback section below. */
+  /** Durable (not per-colo, unlike the Cache API below) fallback store —
+   * holds both the latest-10 article list snapshot and a per-slug snapshot
+   * of every individual article ever fetched; see the fallback sections
+   * below. */
   ARTICLES_FALLBACK: KVNamespace;
 }
 
@@ -42,6 +44,12 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
+
+// Moved up here (used well beyond the comments section further down) since
+// both the durable-fallback code and the comments routes need to recognize
+// an article detail path.
+const ARTICLE_SLUG_PATH = /^\/articles\/[^/]+$/;
+const ARTICLE_COMMENTS_PATH = /^\/articles\/[^/]+\/comments$/;
 
 // --- Stale-while-revalidate cache -----------------------------------------
 //
@@ -223,9 +231,12 @@ async function revalidate(env: Env, pathname: string, search: string, key: Reque
     // consumes the response body, so cloning after would be too late. Only
     // the plain (unpaginated) list request updates the durable "latest 10"
     // snapshot — a paginated page's background refresh has no business
-    // overwriting it with a partial slice.
+    // overwriting it with a partial slice. Article detail requests update
+    // their own per-slug snapshot instead (see writeDetailFallbackSnapshot).
     if (pathname === LIST_PATH && search === '') {
       await writeFallbackSnapshot(env, response.clone());
+    } else if (ARTICLE_SLUG_PATH.test(pathname)) {
+      await writeDetailFallbackSnapshot(env, extractSlug(pathname), response.clone());
     }
     await cache.put(key, response);
   }
@@ -246,11 +257,15 @@ async function revalidate(env: Env, pathname: string, search: string, key: Reque
 // may click) get written here. If a live origin fetch for the list is slow
 // past ORIGIN_TIMEOUT_MS or fails outright, this snapshot is served instead.
 //
-// Deliberately NOT extended to the article detail route (GET /articles/{slug})
-// — the existing per-route Cache API SWR caching there already does exactly
-// what's wanted (serve-if-cached, background-refresh, synchronous-fetch-on-
-// true-cold-miss); opening an article that isn't already cached from a real
-// prior visit still waits on origin, unchanged, by design.
+// Originally scoped to the list route only — the article detail route (GET
+// /articles/{slug}) relied on the per-route Cache API SWR caching above being
+// enough on its own. Extended to individual articles too as of the backlog
+// item filed 2026-09-11 (see the "Durable detail fallback" section below):
+// that per-colo caching isn't actually enough, because a colo can be cold for
+// one *specific* article even when it's not brand-new and other colos already
+// have it cached — happened in production to a heavily-edited article a
+// reader clicked straight from the home page onto a colo that had simply
+// never served that slug before.
 const LIST_PATH = '/articles';
 const FALLBACK_KV_KEY = 'latest-10';
 const FALLBACK_SIZE = 10;
@@ -335,16 +350,99 @@ async function fetchListWithFallback(
   return fallback ?? originPromise;
 }
 
+// --- Durable detail fallback -------------------------------------------
+//
+// Same mechanism as the list fallback above, extended to individual articles
+// per the backlog item filed 2026-09-11 (see the LIST_PATH comment above for
+// the production incident that motivated it). Key differences from the list
+// snapshot: every article gets its own KV entry — no cap, no cutoff to pick,
+// since (unlike the list) there's no natural "latest N" that covers the
+// actual failure mode — written on every successful origin fetch, whether a
+// cold-miss or a background revalidate; and the full rendered `content` is
+// kept, not blanked, since that's the entire point of this route. Reuses the
+// same ARTICLES_FALLBACK namespace as the list snapshot rather than
+// provisioning a second KV namespace for what's the same fallback purpose —
+// a `article:{slug}` key prefix keeps the two from ever colliding. Storage
+// stays tiny at this blog's scale (one entry per article ever fetched, a few
+// KB each); write volume is bounded by real traffic — at most once per
+// REVALIDATE_INTERVAL_MS per colo per article, not per page view.
+function detailFallbackKey(slug: string): string {
+  return `article:${slug}`;
+}
+
+/** Extracts the slug from a pathname already matched against
+ * ARTICLE_SLUG_PATH by the caller — a plain substring slice past the fixed
+ * '/articles/' prefix, not a route param, since this Worker has no router. */
+function extractSlug(pathname: string): string {
+  return pathname.slice(LIST_PATH.length + 1);
+}
+
+async function writeDetailFallbackSnapshot(env: Env, slug: string, articleResponse: Response): Promise<void> {
+  const article = await articleResponse.json();
+  await env.ARTICLES_FALLBACK.put(detailFallbackKey(slug), JSON.stringify(article));
+}
+
+async function readDetailFallbackSnapshot(env: Env, slug: string): Promise<Response | null> {
+  const stored = await env.ARTICLES_FALLBACK.get(detailFallbackKey(slug));
+  if (!stored) return null;
+  return new Response(stored, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+  });
+}
+
+/** Cold-miss handling for GET /articles/{slug} — mirrors fetchListWithFallback
+ * exactly (same race against ORIGIN_TIMEOUT_MS, same background continuation
+ * via ctx.waitUntil on a timeout/failure, same "no snapshot yet → wait on
+ * origin" bottom-out); see that function's doc comment for the full
+ * mechanism. The only difference is the fallback key is per-slug here rather
+ * than the single fixed list key. */
+async function fetchDetailWithFallback(
+  env: Env,
+  ctx: ExecutionContext,
+  pathname: string,
+  key: Request,
+  slug: string,
+): Promise<Response> {
+  const originPromise = fetchAndRender(env, pathname, '').then(async ({ response, cacheable }) => {
+    if (cacheable) {
+      await cache.put(key, response.clone());
+      await writeDetailFallbackSnapshot(env, slug, response.clone());
+    }
+    return response;
+  });
+
+  type Outcome = { kind: 'origin'; response: Response } | { kind: 'unavailable' };
+  const settled: Promise<Outcome> = originPromise
+    .then((response): Outcome => ({ kind: 'origin', response }))
+    .catch((): Outcome => ({ kind: 'unavailable' }));
+  const timedOut: Promise<Outcome> = new Promise((resolve) => {
+    setTimeout(() => resolve({ kind: 'unavailable' }), ORIGIN_TIMEOUT_MS);
+  });
+
+  const winner = await Promise.race([settled, timedOut]);
+  if (winner.kind === 'origin') {
+    return winner.response;
+  }
+
+  ctx.waitUntil(originPromise.then(() => undefined).catch(() => undefined));
+
+  const fallback = await readDetailFallbackSnapshot(env, slug);
+  return fallback ?? originPromise;
+}
+
 /** Proxies a GET to the API with stale-while-revalidate caching: an existing
  * cache entry is always served immediately; a background refresh is kicked
  * off (not awaited) only when it's older than REVALIDATE_INTERVAL_MS. On a
  * cold cache miss, fetches synchronously (nothing to serve yet) and seeds
- * the cache for next time — except the *plain* list route (no query string),
- * which races that fetch against a durable fallback (see
- * fetchListWithFallback above). A paginated list request
+ * the cache for next time — except the *plain* list route (no query string)
+ * and any article detail route, both of which race that fetch against a
+ * durable KV fallback instead (see fetchListWithFallback/
+ * fetchDetailWithFallback above). A paginated list request
  * (`/articles?limit=&after=`, infinite scroll's "load more") gets its own
- * cache entry via the query-string-aware cache key, but not the durable
- * fallback — same generic cold-miss path as the article detail route. */
+ * cache entry via the query-string-aware cache key, but no durable fallback —
+ * it's progressive enhancement on top of an already-rendered page, not the
+ * critical first paint the fallback exists to protect. */
 async function proxyArticlesRequest(
   env: Env,
   ctx: ExecutionContext,
@@ -367,15 +465,16 @@ async function proxyArticlesRequest(
     return fetchListWithFallback(env, ctx, key);
   }
 
+  if (ARTICLE_SLUG_PATH.test(pathname)) {
+    return fetchDetailWithFallback(env, ctx, pathname, key, extractSlug(pathname));
+  }
+
   const { response, cacheable } = await fetchAndRender(env, pathname, search);
   if (cacheable) {
     ctx.waitUntil(cache.put(key, response.clone()));
   }
   return response;
 }
-
-const ARTICLE_SLUG_PATH = /^\/articles\/[^/]+$/;
-const ARTICLE_COMMENTS_PATH = /^\/articles\/[^/]+\/comments$/;
 
 // --- Comments --------------------------------------------------------------
 //
