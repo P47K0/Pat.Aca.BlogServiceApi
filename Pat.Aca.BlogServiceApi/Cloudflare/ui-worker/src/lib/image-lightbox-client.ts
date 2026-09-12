@@ -17,7 +17,16 @@
  * image's own intrinsic dimensions (some article diagrams are SVGs with
  * only a viewBox — an aspect ratio, no intrinsic pixel size, which a
  * fit-content-sized popover can't size around), so plain sequential
- * assignment here is all that's needed. */
+ * assignment here is all that's needed.
+ *
+ * That fixed-size box plus object-contain means an image whose aspect
+ * ratio doesn't match the box leaves transparent letterbox space above/
+ * below (or beside) it — still technically inside the popover element, so
+ * the browser's own light-dismiss (which only fires for clicks outside the
+ * popover) never catches a tap there. Closes on any click inside the
+ * popover that isn't on the image itself or the close button, so that
+ * space is closeable too — the close button can end up unreachable after
+ * a mobile orientation change, and this doesn't depend on finding it. */
 export const IMAGE_LIGHTBOX_CLIENT_SCRIPT = `(function () {
   var content = document.getElementById('article-content');
   var lightbox = document.getElementById('image-lightbox');
@@ -32,4 +41,9 @@ export const IMAGE_LIGHTBOX_CLIENT_SCRIPT = `(function () {
       lightbox.showPopover();
     });
   }
+
+  lightbox.addEventListener('click', function (event) {
+    if (event.target === lightboxImg || event.target.closest('button')) return;
+    lightbox.hidePopover();
+  });
 })();`;
