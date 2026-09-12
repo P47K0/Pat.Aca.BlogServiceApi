@@ -24,9 +24,17 @@
  * below (or beside) it — still technically inside the popover element, so
  * the browser's own light-dismiss (which only fires for clicks outside the
  * popover) never catches a tap there. Closes on any click inside the
- * popover that isn't on the image itself or the close button, so that
- * space is closeable too — the close button can end up unreachable after
- * a mobile orientation change, and this doesn't depend on finding it. */
+ * popover except the close button, so that space is closeable too — the
+ * close button can end up unreachable after a mobile orientation change,
+ * and this doesn't depend on finding it.
+ *
+ * Also closes on a tap directly on the image itself, on request — and
+ * this turned out to be the fix that actually mattered for the letterbox
+ * case too: object-fit only changes how the image is *painted*, not its
+ * hit-test box, and #image-lightbox-img is sized h-full/w-full to fill the
+ * popover — so it, not the popover, was receiving essentially every click
+ * in that area. Excluding it (the first version of this handler did)
+ * left almost no surface that could ever reach this listener at all. */
 export const IMAGE_LIGHTBOX_CLIENT_SCRIPT = `(function () {
   var content = document.getElementById('article-content');
   var lightbox = document.getElementById('image-lightbox');
@@ -43,7 +51,7 @@ export const IMAGE_LIGHTBOX_CLIENT_SCRIPT = `(function () {
   }
 
   lightbox.addEventListener('click', function (event) {
-    if (event.target === lightboxImg || event.target.closest('button')) return;
+    if (event.target.closest('button')) return;
     lightbox.hidePopover();
   });
 })();`;
