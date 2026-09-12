@@ -65,6 +65,32 @@ resource account 'Microsoft.DocumentDB/databaseAccounts@2023-11-15' = {
   }
 }
 
+// Second database, deliberately separate from ArticlesDB, with no
+// throughput specified at this resource's own level. Vector search is not
+// supported in a database that has shared throughput provisioned at the
+// database level, and ArticlesDB already does (Articles/Comments/
+// CommentsLeases all ride its 1000 RU/s shared pool) -- giving
+// knowledgeBaseContainer its own dedicated throughput isn't enough on its
+// own if it stays a child of ArticlesDB, since the restriction is about
+// the database it lives in, not just the specific container's own
+// throughput setting. Found this the hard way: PR #30 originally put
+// knowledgeBaseContainer directly under ArticlesDB with its own dedicated
+// autoscale throughput, deployed cleanly for the capability/role
+// resources but the container itself failed with Cosmos's own
+// "shared throughput" BadRequest, confirmed against Microsoft's docs
+// 2026-09-12 after the fact. AssistantDB has no options.throughput of its
+// own -- only its one container (knowledgeBaseContainer) is billed, at
+// that container's own dedicated autoscale rate.
+resource assistantDatabase 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2023-11-15' = {
+  parent: account
+  name: 'AssistantDB'
+  properties: {
+    resource: {
+      id: 'AssistantDB'
+    }
+  }
+}
+
 resource database 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2023-11-15' = {
   parent: account
   name: databaseName
@@ -194,9 +220,10 @@ resource commentsLeasesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatab
 // that for the foreseeable future), and quantizedFlat is the simpler of
 // the two for a container this small.
 //
-// Dedicated autoscale throughput, not the shared database-level pool the
-// other containers here ride -- vector search isn't supported on shared
-// throughput at all, so this container has to have its own. Minimum
+// Dedicated autoscale throughput, set on this container directly. This
+// alone isn't sufficient though -- see assistantDatabase's own comment
+// above for why this container also has to live in its own database, not
+// ArticlesDB, even with its own dedicated throughput set here. Minimum
 // autoscale tier (max 1000 RU/s, floor 100) chosen deliberately over the
 // flat 400 RU/s manual minimum: this container's usage (rare writes,
 // occasional reads from chat queries) is idle-dominated, and autoscale
@@ -220,7 +247,7 @@ resource commentsLeasesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatab
 // succeeded won't be redone, only this still-missing resource gets
 // retried.
 resource knowledgeBaseContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-11-15' = {
-  parent: database
+  parent: assistantDatabase
   name: 'KnowledgeBase'
   properties: {
     resource: {
@@ -291,7 +318,7 @@ resource cosmosKnowledgeBaseWriterRoleDefinition 'Microsoft.DocumentDB/databaseA
     roleName: 'KnowledgeBase Writer'
     type: 'CustomRole'
     assignableScopes: [
-      '${account.id}/dbs/${database.name}/colls/${knowledgeBaseContainer.name}'
+      '${account.id}/dbs/${assistantDatabase.name}/colls/${knowledgeBaseContainer.name}'
     ]
     permissions: [
       {
@@ -311,7 +338,7 @@ resource cosmosKnowledgeBaseWriterRoleAssignment 'Microsoft.DocumentDB/databaseA
   properties: {
     roleDefinitionId: cosmosKnowledgeBaseWriterRoleDefinition.id
     principalId: knowledgeBaseWriterPrincipalId
-    scope: '${account.id}/dbs/${database.name}/colls/${knowledgeBaseContainer.name}'
+    scope: '${account.id}/dbs/${assistantDatabase.name}/colls/${knowledgeBaseContainer.name}'
   }
 }
 
@@ -499,5 +526,6 @@ output cosmosDatabaseName string = database.name
 output cosmosContainerName string = container.name
 output cosmosCommentsContainerName string = commentsContainer.name
 output cosmosCommentsLeasesContainerName string = commentsLeasesContainer.name
+output cosmosAssistantDatabaseName string = assistantDatabase.name
 output cosmosKnowledgeBaseContainerName string = knowledgeBaseContainer.name
 output cosmosEndpoint string = account.properties.documentEndpoint
