@@ -64,3 +64,17 @@ export async function findCachedMatch(
 
   return best && bestScore >= SIMILARITY_THRESHOLD ? best : null;
 }
+
+/** Appends a new entry after a cache miss is resolved from Cosmos. Read-then-
+ * write, not atomic — two concurrent misses for near-identical questions
+ * could each append their own entry rather than one winning, an accepted
+ * simplification at this cache's expected scale (dozens to low hundreds of
+ * distinct questions ever asked), same spirit as this project's other
+ * accepted non-atomic trade-offs (e.g. api-proxy's per-colo Cache API). No
+ * cap on entry count yet either — revisit if real usage ever makes the
+ * single KV value's size a concern. */
+export async function addCacheEntry(kv: KVNamespace, entry: CacheEntry): Promise<void> {
+  const entries = await readCacheEntries(kv);
+  entries.push(entry);
+  await kv.put(CACHE_KV_KEY, JSON.stringify(entries));
+}

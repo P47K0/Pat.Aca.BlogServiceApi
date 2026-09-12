@@ -30,6 +30,24 @@ binding = "AI"
 binding = "ASSISTANT_CACHE"
 id = "REPLACE_ME_ASSISTANT_CACHE_KV_ID"
 
+# Cosmos account + KnowledgeBase-Reader identity (see infra/cosmos-db.bicep's
+# knowledgeBaseReaderPrincipalId): a dedicated, read+executeQuery-only
+# identity for this Worker's retrieval path, deliberately narrower than
+# KnowledgeBase-Writer since this Worker is public-facing. Tenant/client ID
+# aren't secrets (same reasoning as the .NET API's AzureAd TenantId/ClientId
+# in appsettings.json) — only the client secret is, set via
+# `wrangler secret put KNOWLEDGEBASE_READER_CLIENT_SECRET`.
+#
+# PLACEHOLDERS — the KnowledgeBase-Reader app registration doesn't exist yet
+# (create it by hand in the personal Entra tenant, same as
+# KnowledgeBase-Writer: no App ID URI/role/admin consent needed, Cosmos
+# checks its own RBAC by object ID) — fill in the real tenant/client ID here
+# once it does.
+[vars]
+COSMOS_ACCOUNT_NAME = "cosmos-koorevaar"
+KNOWLEDGEBASE_READER_TENANT_ID = "REPLACE_ME_TENANT_ID"
+KNOWLEDGEBASE_READER_CLIENT_ID = "REPLACE_ME_CLIENT_ID"
+
 # A shared secret (`wrangler secret put ...`) for the cache-invalidation
 # endpoint ACA will call still lands in a later commit, mirroring
 # ApiSecurity's existing pattern.
