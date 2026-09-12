@@ -10,14 +10,14 @@
  * and opens it; open/close/light-dismiss/Escape all come from the native
  * popover itself, same as TagCloud.
  *
- * Order matters here: showPopover() runs *before* .src is set, so the img
- * is already part of the visible top layer once it starts loading — it
- * then reflows on load exactly like any normal in-page image. Doing it the
- * other way around (set .src, then open) raced the image's own load, and
- * an earlier attempt at fixing that with img.decode() before opening
- * turned out to hang indefinitely for at least one SVG (decode() needs a
- * layout to decode into, which a hidden/not-yet-shown popover doesn't have
- * — this ordering sidesteps that entirely instead of working around it). */
+ * Two earlier attempts at getting the image to actually show (rather than
+ * just the backdrop) tried to time this click handler around the image's
+ * own load — both wrong. The real fix was sizing: the popover/img in
+ * ArticleDetail.tsx now get a definite size independent of the clicked
+ * image's own intrinsic dimensions (some article diagrams are SVGs with
+ * only a viewBox — an aspect ratio, no intrinsic pixel size, which a
+ * fit-content-sized popover can't size around), so plain sequential
+ * assignment here is all that's needed. */
 export const IMAGE_LIGHTBOX_CLIENT_SCRIPT = `(function () {
   var content = document.getElementById('article-content');
   var lightbox = document.getElementById('image-lightbox');
@@ -27,9 +27,9 @@ export const IMAGE_LIGHTBOX_CLIENT_SCRIPT = `(function () {
   var images = content.querySelectorAll('img');
   for (var i = 0; i < images.length; i++) {
     images[i].addEventListener('click', function (event) {
+      lightboxImg.src = event.target.src;
       lightboxImg.alt = event.target.alt || '';
       lightbox.showPopover();
-      lightboxImg.src = event.target.src;
     });
   }
 })();`;
