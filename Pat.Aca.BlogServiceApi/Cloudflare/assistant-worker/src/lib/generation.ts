@@ -1,14 +1,23 @@
 import type { KnowledgeBaseChunk } from './cosmos-client';
 
-// gemma-3-12b-it, not a 7B/8B model: no current Workers AI model sits in
-// that band for general chat (the catalog has visibly churned since the
-// project's original 8B pick, the exact Llama-vs-GLM deprecation risk this
-// backlog item already flagged once) -- 12B is the closest available "it"
-// (instruction-tuned) general chat model, and Gemma 3's documented
-// multilingual training matters directly here given the English/Dutch
-// bilingual requirement. Isolated to this one constant, behind the adapter
-// below, so a future swap is a one-line change, not a call-site hunt.
-const GENERATION_MODEL = '@cf/google/gemma-3-12b-it';
+// @cf/meta/llama-3.1-8b-instruct-fp8, not gemma-3-12b-it as originally
+// picked: the account this actually runs under returned a hard 403
+// ("This account is not allowed to access @cf/google/gemma-3-12b-it") on the
+// first live smoke test -- some Workers AI models are account-gated
+// independent of whether they exist in the public catalog, a real
+// constraint the type definitions alone don't reveal. This model is already
+// in active use in this user's other Workers, so it's both known-accessible
+// on this account and genuinely this project's usual 7B/8B default, not a
+// compromise -- earlier searches for it here missed it because it's typed
+// generically as BaseAiTextGeneration (a shared legacy shape covering many
+// older models) rather than getting a model-specific interface the way
+// newer catalog entries do, so a grep for per-model type names skipped
+// right over it. Isolated to this one constant, behind the adapter below,
+// so a future swap stays a one-line change, not a call-site hunt. Same
+// { messages } input / { response: string } output shape as gemma-3-12b-it,
+// so normalizeGenerationResponse() needed no changes -- exactly the
+// scenario that adapter exists for.
+const GENERATION_MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8';
 
 // Guardrails for a bot that represents a real person, answering unmoderated
 // visitor questions:
