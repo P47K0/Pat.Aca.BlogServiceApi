@@ -21,33 +21,28 @@ binding = "AI"
 # Semantic cache: {questionEmbedding, chunks, cachedAt} entries, brute-force
 # cosine-compared against an incoming question's embedding before falling
 # through to a live Cosmos VectorDistance() query.
-#
-# PLACEHOLDER ID — run `wrangler kv namespace create ASSISTANT_CACHE`
-# (requires `wrangler login`, not available in this sandbox — same
-# limitation as the original ARTICLES_FALLBACK namespace in api-proxy) and
-# paste the real id here before deploying.
 [[kv_namespaces]]
 binding = "ASSISTANT_CACHE"
-id = "REPLACE_ME_ASSISTANT_CACHE_KV_ID"
+id = "aa6b0fb3feb043b9a4187d11789a0300"
 
-# Cosmos account + KnowledgeBase-Reader identity (see infra/cosmos-db.bicep's
-# knowledgeBaseReaderPrincipalId): a dedicated, read+executeQuery-only
-# identity for this Worker's retrieval path, deliberately narrower than
-# KnowledgeBase-Writer since this Worker is public-facing. Tenant/client ID
-# aren't secrets (same reasoning as the .NET API's AzureAd TenantId/ClientId
-# in appsettings.json) — only the client secret is, set via
-# `wrangler secret put KNOWLEDGEBASE_READER_CLIENT_SECRET`.
-#
-# PLACEHOLDERS — the KnowledgeBase-Reader app registration doesn't exist yet
-# (create it by hand in the personal Entra tenant, same as
-# KnowledgeBase-Writer: no App ID URI/role/admin consent needed, Cosmos
-# checks its own RBAC by object ID) — fill in the real tenant/client ID here
-# once it does.
+# Cosmos account — same account the blog API uses, not sensitive.
 [vars]
 COSMOS_ACCOUNT_NAME = "cosmos-koorevaar"
-KNOWLEDGEBASE_READER_TENANT_ID = "REPLACE_ME_TENANT_ID"
-KNOWLEDGEBASE_READER_CLIENT_ID = "REPLACE_ME_CLIENT_ID"
 
-# A shared secret (`wrangler secret put ...`) for the cache-invalidation
-# endpoint ACA will call still lands in a later commit, mirroring
-# ApiSecurity's existing pattern.
+# KnowledgeBase-Reader identity (see infra/cosmos-db.bicep's
+# knowledgeBaseReaderPrincipalId): a dedicated, read+executeQuery-only
+# identity for this Worker's retrieval path, deliberately narrower than
+# KnowledgeBase-Writer since this Worker is public-facing.
+#
+# KNOWLEDGEBASE_READER_TENANT_ID / _CLIENT_ID / _CLIENT_SECRET are all set via
+# the dashboard's Settings -> Variables and Secrets (or `wrangler secret put
+# <NAME>`), by deliberate choice, not committed here even though the tenant/
+# client ID aren't strictly secret. Set all three as "Secret" (encrypted)
+# there, not the plain-text variant — a plain-text dashboard var that isn't
+# also declared in this file's own [vars] gets wiped by the next
+# `wrangler deploy` (which syncs plain vars to exactly match [vars]); a
+# Secret-type value persists independently of what's deployed, same as
+# ARTICLES_API_KEY in api-proxy.
+#
+# A shared secret for the cache-invalidation endpoint ACA will call still
+# lands in a later commit, mirroring ApiSecurity's existing pattern.

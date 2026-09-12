@@ -30,18 +30,19 @@ project's own conventions:
 
 ```bash
 npm install
-wrangler login                                    # one-time, not done in this sandbox
-wrangler kv namespace create ASSISTANT_CACHE      # then paste the real id into
-                                                   # wrangler.toml's ASSISTANT_CACHE
-                                                   # binding, replacing the placeholder
-wrangler secret put KNOWLEDGEBASE_READER_CLIENT_SECRET
+wrangler login   # one-time, not done in this sandbox
 ```
 
-`KNOWLEDGEBASE_READER_TENANT_ID`/`_CLIENT_ID` in `wrangler.toml` are also
-placeholders until the `KnowledgeBase-Reader` app registration exists (create
-it by hand in the personal Entra tenant, same as `KnowledgeBase-Writer` — see
-`infra/cosmos-db.bicep`'s `knowledgeBaseReaderPrincipalId`) and
-`cosmos-db.yml` has been re-run with its principal ID.
+`ASSISTANT_CACHE`'s KV namespace is already created and wired into
+`wrangler.toml`. `KNOWLEDGEBASE_READER_TENANT_ID`/`_CLIENT_ID`/
+`_CLIENT_SECRET` are **not** in `wrangler.toml` — set all three via the
+dashboard's Settings -> Variables and Secrets (as "Secret", not the
+plain-text variant — see `wrangler.toml`'s own comment for why) or
+`wrangler secret put <NAME>`, once the `KnowledgeBase-Reader` app
+registration exists (create it by hand in the personal Entra tenant, same as
+`KnowledgeBase-Writer` — see `infra/cosmos-db.bicep`'s
+`knowledgeBaseReaderPrincipalId`) and `cosmos-db.yml` has been re-run with
+its principal ID.
 
 ## Deploy
 

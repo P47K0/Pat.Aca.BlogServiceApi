@@ -12,13 +12,14 @@ export interface Env {
   /** Tenant/client ID of the KnowledgeBase-Reader app registration — a
    * dedicated, read+executeQuery-only identity (see infra/cosmos-db.bicep's
    * knowledgeBaseReaderPrincipalId), deliberately narrower than
-   * KnowledgeBase-Writer since this Worker is public-facing. Not secrets
-   * (same reasoning as the .NET API's AzureAd TenantId/ClientId), plain
-   * `[vars]` entries. */
+   * KnowledgeBase-Writer since this Worker is public-facing. Not secrets in
+   * principle (same reasoning as the .NET API's AzureAd TenantId/ClientId),
+   * but set as dashboard Secrets alongside the client secret below by
+   * choice, not committed to wrangler.toml — see that file's own comment. */
   KNOWLEDGEBASE_READER_TENANT_ID: string;
   KNOWLEDGEBASE_READER_CLIENT_ID: string;
-  /** The one real secret of the three — set via
-   * `wrangler secret put KNOWLEDGEBASE_READER_CLIENT_SECRET`, never in
-   * wrangler.toml. */
+  /** The one of the three that's a real secret — set via the dashboard's
+   * Variables and Secrets (or `wrangler secret put
+   * KNOWLEDGEBASE_READER_CLIENT_SECRET`), never in wrangler.toml. */
   KNOWLEDGEBASE_READER_CLIENT_SECRET: string;
 }
