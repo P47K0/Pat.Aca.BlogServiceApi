@@ -92,15 +92,24 @@ export const ArticleDetailPage: FC<{
           as TagCloud's "Show all tags" popover — the only bit that can't be
           done with a plain popovertarget attribute is wiring the click on
           each (dynamic, server-rendered) <img>, which is what
-          image-lightbox-client.ts's small script does. */}
+          image-lightbox-client.ts's small script does.
+
+          The outer popover gets a definite h-[90vh]/w-[90vh] size (not
+          fit-content) and the inner <img> fills it via h-full/w-full +
+          object-contain, rather than sizing the popover to the image's own
+          intrinsic dimensions — some article diagrams are SVGs with only a
+          viewBox (an aspect ratio, no intrinsic pixel size), which a
+          fit-content/max-h/max-w-only layout can't size at all. This way
+          sizing never depends on the image's own intrinsic size, for any
+          format. */}
       {hasContentImages && (
         <>
           <div
             id="image-lightbox"
             popover="auto"
-            class="m-auto max-h-[90vh] max-w-[90vw] border-0 bg-transparent p-0 backdrop:bg-black/70"
+            class="m-auto h-[90vh] w-[90vw] border-0 bg-transparent p-0 backdrop:bg-black/70"
           >
-            <div class="relative">
+            <div class="relative h-full w-full">
               <button
                 popovertarget="image-lightbox"
                 popovertargetaction="hide"
@@ -113,7 +122,7 @@ export const ArticleDetailPage: FC<{
                 id="image-lightbox-img"
                 src=""
                 alt=""
-                class="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+                class="h-full w-full rounded-lg object-contain"
               />
             </div>
           </div>
