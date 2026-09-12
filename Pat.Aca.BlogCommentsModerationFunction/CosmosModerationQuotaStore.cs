@@ -16,6 +16,9 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// A date-scoped document id (moderation-quota-yyyy-MM-dd) means no
     /// explicit "is it a new day yet" reset logic is ever needed -- each
     /// day just gets a fresh id, created lazily on that day's first call.
+    /// Each document also gets a TTL (QuotaDocumentTtlSeconds) so old days'
+    /// documents self-expire instead of accumulating forever -- found in
+    /// production 2026-09-11 that nothing had ever cleaned these up.
     /// The increment itself is a single atomic, conditional Cosmos Patch
     /// (PatchItemRequestOptions.FilterPredicate) rather than a
     /// read-then-write, so two comments scored at nearly the same moment
@@ -51,6 +54,16 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     public sealed class CosmosModerationQuotaStore : IModerationQuotaStore
     {
         private const string QuotaPartitionKeyValue = "__quota__";
+
+        // Retention for a day's quota document once it's no longer today's --
+        // the document is only ever relevant for the one UTC day it counts,
+        // so 2 days is just enough buffer to still see yesterday's count
+        // while troubleshooting, without letting them accumulate forever.
+        // Relies on the Comments container's defaultTtl: -1
+        // (infra/cosmos-db.bicep), which enables per-item TTL without
+        // forcing any expiration on real comment documents, which never set
+        // this field at all.
+        private const int QuotaDocumentTtlSeconds = 2 * 24 * 60 * 60;
 
         private readonly Container _container;
         private readonly ModerationSettings _moderationSettings;
@@ -136,7 +149,8 @@ namespace Pat.Aca.BlogCommentsModerationFunction
             {
                 Id = docId,
                 ArticleSlug = QuotaPartitionKeyValue,
-                Count = 1
+                Count = 1,
+                Ttl = QuotaDocumentTtlSeconds
             };
 
             try
@@ -177,6 +191,12 @@ namespace Pat.Aca.BlogCommentsModerationFunction
 
             [JsonProperty("count")]
             public int Count { get; set; }
+
+            // Cosmos's reserved per-item TTL field (seconds since last
+            // modified). Only set here, never on a real Comment document --
+            // see QuotaDocumentTtlSeconds's own doc comment.
+            [JsonProperty("ttl")]
+            public int? Ttl { get; set; }
         }
     }
 }

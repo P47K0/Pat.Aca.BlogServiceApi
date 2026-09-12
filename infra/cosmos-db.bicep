@@ -123,6 +123,15 @@ resource commentsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/c
           }
         ]
       }
+      // -1 enables per-item TTL without forcing a default expiration on
+      // everything -- real comments never set their own ttl field, so they
+      // stay permanent. CosmosModerationQuotaStore's daily counter documents
+      // (a synthetic doc sharing this container, see its own doc comment)
+      // are the one thing here that sets ttl explicitly, so they self-expire
+      // instead of accumulating one tiny document per day forever, found in
+      // production 2026-09-11 (a "yesterday" and "today" doc already sitting
+      // there, nothing had ever cleaned either up).
+      defaultTtl: -1
     }
   }
 }
