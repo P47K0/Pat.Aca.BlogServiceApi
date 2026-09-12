@@ -40,6 +40,15 @@ on:
           workflow's output. Leave blank to skip; re-run later with this
           filled in without affecting anything else.
         required: false
+      knowledgeBaseWriterPrincipalId:
+        description: >
+          Service principal object ID of the KnowledgeBase-Writer app
+          registration (a dedicated identity for the AI chat assistant
+          project, separate from blogServicePrincipalId) — get it via
+          `az ad sp show --id <clientId> --query id -o tsv`. Leave blank to
+          skip; re-run later with this filled in without affecting anything
+          else.
+        required: false
 
 jobs:
   deploy:
@@ -69,6 +78,7 @@ jobs:
           LOCATION: ${{ inputs.location }}
           AUTHOR_PRINCIPAL_ID: ${{ inputs.blogAuthorPrincipalId }}
           COMMENTS_FUNCTION_PRINCIPAL_ID: ${{ inputs.blogCommentsFunctionPrincipalId }}
+          KNOWLEDGE_BASE_WRITER_PRINCIPAL_ID: ${{ inputs.knowledgeBaseWriterPrincipalId }}
         run: |
           set -euo pipefail
 
@@ -84,6 +94,10 @@ jobs:
           if [ -n "$COMMENTS_FUNCTION_PRINCIPAL_ID" ]; then
             echo "Granting Comments container RBAC to the moderation Function's principal: $COMMENTS_FUNCTION_PRINCIPAL_ID"
             params+=(blogCommentsFunctionPrincipalId="$COMMENTS_FUNCTION_PRINCIPAL_ID")
+          fi
+          if [ -n "$KNOWLEDGE_BASE_WRITER_PRINCIPAL_ID" ]; then
+            echo "Granting KnowledgeBase container RBAC to the assistant writer principal: $KNOWLEDGE_BASE_WRITER_PRINCIPAL_ID"
+            params+=(knowledgeBaseWriterPrincipalId="$KNOWLEDGE_BASE_WRITER_PRINCIPAL_ID")
           fi
 
           az deployment group create \

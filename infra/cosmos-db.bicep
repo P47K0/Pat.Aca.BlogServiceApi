@@ -25,6 +25,18 @@ param blogAuthorPrincipalId string = ''
 @description('Principal object ID of the Comments moderation Function\'s managed identity. Optional — leave blank until that Function is deployed and its principal id is known (same chicken-and-egg deploy-then-configure ordering as blogServicePrincipalId originally needed).')
 param blogCommentsFunctionPrincipalId string = ''
 
+@description('Principal object ID of the KnowledgeBase-Writer app registration\'s service principal — a dedicated identity (deliberately separate from blogServicePrincipalId) Claude authenticates as to write embeddings directly into the KnowledgeBase container for the AI chat assistant project, bypassing the .NET API for this container entirely. Optional — leave blank to skip provisioning the KnowledgeBase container/role until ready.')
+param knowledgeBaseWriterPrincipalId string = ''
+
+// EnableNoSQLVectorSearch (below) and knowledgeBaseContainer (further down)
+// are deployed together in this one template for simplicity, but the
+// capability can take up to ~15 minutes to actually propagate per
+// Microsoft's own docs, and the container's vector policy depends on it
+// already being active. If knowledgeBaseContainer fails on a deployment's
+// first attempt, that's why — wait a few minutes and re-run cosmos-db.yml
+// unchanged. Incremental mode means anything that already succeeded
+// (including this capability flag) won't be redone, only the still-missing
+// resource gets retried.
 resource account 'Microsoft.DocumentDB/databaseAccounts@2023-11-15' = {
   name: toLower(accountName)
   location: location
@@ -45,6 +57,11 @@ resource account 'Microsoft.DocumentDB/databaseAccounts@2023-11-15' = {
     isVirtualNetworkFilterEnabled: false
     enableFreeTier: true
     disableLocalAuth: true
+    capabilities: [
+      {
+        name: 'EnableNoSQLVectorSearch'
+      }
+    ]
   }
 }
 
@@ -155,6 +172,146 @@ resource commentsLeasesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatab
         kind: 'Hash'
       }
     }
+  }
+}
+
+// KnowledgeBase container for the AI chat assistant project (a separate
+// future project sharing this Cosmos account, see the backlog item "AI
+// chat/assistant that answers questions about Patrick" for the full design)
+// -- a RAG knowledge store holding article-derived chunks and "about me"
+// profile facts side by side, distinguished by a sourceType field, not the
+// Articles container plus a new field. Cosmos's vector embedding/index
+// policy is immutable once a container is created and cannot be added to
+// an existing one (confirmed against Microsoft's current docs, 2026-09-12)
+// -- that's the whole reason this is a brand new container rather than an
+// embedding field bolted onto Articles.
+//
+// Embeddings are bge-m3 (1024-dimensional, chosen for multilingual
+// English/Dutch retrieval), cosine distance. quantizedFlat over flat: flat
+// caps out at 505 dimensions, well under bge-m3's 1024, so it isn't even an
+// option here; quantizedFlat and diskANN both fall back to an exact full
+// scan below 1,000 indexed vectors anyway (this container is nowhere near
+// that for the foreseeable future), and quantizedFlat is the simpler of
+// the two for a container this small.
+//
+// Dedicated autoscale throughput, not the shared database-level pool the
+// other containers here ride -- vector search isn't supported on shared
+// throughput at all, so this container has to have its own. Minimum
+// autoscale tier (max 1000 RU/s, floor 100) chosen deliberately over the
+// flat 400 RU/s manual minimum: this container's usage (rare writes,
+// occasional reads from chat queries) is idle-dominated, and autoscale
+// bills for whatever it actually scaled to each hour rather than a flat
+// rate -- meaningfully cheaper here despite the 1.5x per-RU multiplier.
+//
+// Partition key is /sourceType (only two values today, "article"/"profile")
+// -- a deliberately low-cardinality choice that would be a poor fit at real
+// scale, but this container is expected to stay in the dozens-to-low-
+// hundreds of documents range, where partition fan-out cost is negligible;
+// it was picked for the logical grouping it gives (scoping a future query
+// to just profile facts) over strict partitioning best practice.
+//
+// Deploy-order note: this resource's vector policy requires the account's
+// EnableNoSQLVectorSearch capability (see the account resource above) to
+// have actually propagated first, which can take up to ~15 minutes per
+// Microsoft's own docs. Both changes are deployed together in this one
+// template for simplicity, but if this specific resource fails on a
+// deployment's first attempt, that's why -- wait a few minutes and re-run
+// cosmos-db.yml unchanged; Incremental mode means anything that already
+// succeeded won't be redone, only this still-missing resource gets
+// retried.
+resource knowledgeBaseContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-11-15' = {
+  parent: database
+  name: 'KnowledgeBase'
+  properties: {
+    resource: {
+      id: 'KnowledgeBase'
+      partitionKey: {
+        paths: [
+          '/sourceType'
+        ]
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          {
+            path: '/*'
+          }
+        ]
+        excludedPaths: [
+          {
+            path: '/"_etag"/?'
+          }
+          {
+            path: '/embedding/*'
+          }
+        ]
+        vectorIndexes: [
+          {
+            path: '/embedding'
+            type: 'quantizedFlat'
+          }
+        ]
+      }
+      vectorEmbeddingPolicy: {
+        vectorEmbeddings: [
+          {
+            path: '/embedding'
+            dataType: 'float32'
+            distanceFunction: 'cosine'
+            dimensions: 1024
+          }
+        ]
+      }
+    }
+    options: {
+      autoscaleSettings: {
+        maxThroughput: 1000
+      }
+    }
+  }
+}
+
+// Custom role for the KnowledgeBase-Writer app registration's service
+// principal (see knowledgeBaseWriterPrincipalId above) -- container-scoped
+// via assignableScopes, same fencing pattern as
+// cosmosCommentsWriterRoleDefinition below, so this identity gets zero
+// access to Articles/Comments/CommentsLeases even though it's a distinct
+// principal from blogServicePrincipalId. Grants create+replace+read: read
+// so the same identity can sanity-check what it just wrote (and later
+// power retrieval testing) without needing a second role, create for new
+// embeddings, replace for re-embedding a piece of content whose source
+// changed. Skipped entirely when knowledgeBaseWriterPrincipalId is blank,
+// same optional/blank-to-skip pattern as blogAuthorPrincipalId.
+resource cosmosKnowledgeBaseWriterRoleDefinition 'Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions@2024-05-15' = if (!empty(knowledgeBaseWriterPrincipalId)) {
+  parent: account
+  name: guid(account.id, 'KnowledgeBase writer role')
+  properties: {
+    roleName: 'KnowledgeBase Writer'
+    type: 'CustomRole'
+    assignableScopes: [
+      '${account.id}/dbs/${database.name}/colls/${knowledgeBaseContainer.name}'
+    ]
+    permissions: [
+      {
+        dataActions: [
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/create'
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/replace'
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/read'
+        ]
+      }
+    ]
+  }
+}
+
+resource cosmosKnowledgeBaseWriterRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(knowledgeBaseWriterPrincipalId)) {
+  parent: account
+  name: guid(account.id, knowledgeBaseWriterPrincipalId, 'KnowledgeBase writer role')
+  properties: {
+    roleDefinitionId: cosmosKnowledgeBaseWriterRoleDefinition.id
+    principalId: knowledgeBaseWriterPrincipalId
+    scope: '${account.id}/dbs/${database.name}/colls/${knowledgeBaseContainer.name}'
   }
 }
 
@@ -342,4 +499,5 @@ output cosmosDatabaseName string = database.name
 output cosmosContainerName string = container.name
 output cosmosCommentsContainerName string = commentsContainer.name
 output cosmosCommentsLeasesContainerName string = commentsLeasesContainer.name
+output cosmosKnowledgeBaseContainerName string = knowledgeBaseContainer.name
 output cosmosEndpoint string = account.properties.documentEndpoint
