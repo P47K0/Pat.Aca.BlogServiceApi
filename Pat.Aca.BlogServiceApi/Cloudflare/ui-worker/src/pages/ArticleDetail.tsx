@@ -82,7 +82,6 @@ export const ArticleDetailPage: FC<{
           — see blog-service-api-project memory's auth-architecture note.
           Trusted content, so injecting it directly is an accepted trade-off,
           not an oversight. */}
-      {hasContentImages && <style>{'#article-content img { cursor: zoom-in; }'}</style>}
       <div
         id="article-content"
         class="prose prose-neutral mt-8 max-w-none"
