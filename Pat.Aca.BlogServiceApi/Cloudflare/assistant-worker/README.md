@@ -18,9 +18,13 @@ project's own conventions:
    runtime) as the KnowledgeBase-Reader identity, merges/re-sorts results
    client-side (one query per `sourceType` partition — Cosmos's REST API
    can't serve a cross-partition `ORDER BY`), and populates the cache.
-5. Prompt assembly with scoping guardrails.
-6. Generation call via Workers AI, behind a response-shape adapter.
-7. Return JSON — no UI yet (the chat widget itself is a later phase).
+5. Prompt assembly with scoping guardrails + generation call (this commit):
+   `POST /ask` now returns a real generated `answer`, grounded in the
+   retrieved `chunks`, via `@cf/google/gemma-3-12b-it` behind a
+   response-shape adapter (`src/lib/generation.ts`). Guardrail wording is
+   worth a deliberate read in that file before this ever goes live — it's
+   the one piece of this Worker that speaks on your behalf.
+6. Return JSON — no UI yet (the chat widget itself is a later phase).
 
 ## Setup
 

@@ -1,16 +1,16 @@
 import type { Env } from './env';
 import { embedText } from './lib/embeddings';
 import { findCachedMatch, addCacheEntry } from './lib/semantic-cache';
-import { retrieveChunks } from './lib/cosmos-client';
+import { retrieveChunks, type KnowledgeBaseChunk } from './lib/cosmos-client';
+import { generateAnswer } from './lib/generation';
 
 interface AskRequestBody {
   question?: unknown;
 }
 
 /** POST /ask — embeds the question, checks the semantic cache, and on a
- * miss queries KnowledgeBase directly (populating the cache for next time).
- * Guardrails/scoping and the actual generation call are later commits —
- * this still just returns the retrieved chunks as JSON, no answer yet. */
+ * miss queries KnowledgeBase directly (populating the cache for next time),
+ * then generates a grounded answer from whichever chunks were found. */
 async function handleAsk(request: Request, env: Env): Promise<Response> {
   const body = (await request.json().catch(() => null)) as AskRequestBody | null;
   const question = body?.question;
@@ -20,19 +20,20 @@ async function handleAsk(request: Request, env: Env): Promise<Response> {
 
   const questionEmbedding = await embedText(env.AI, question);
 
+  let chunks: KnowledgeBaseChunk[];
+  let cache: 'hit' | 'miss';
   const cached = await findCachedMatch(env.ASSISTANT_CACHE, questionEmbedding);
   if (cached) {
-    return Response.json({ chunks: cached.chunks, cache: 'hit' });
+    chunks = cached.chunks;
+    cache = 'hit';
+  } else {
+    chunks = await retrieveChunks(env, questionEmbedding);
+    await addCacheEntry(env.ASSISTANT_CACHE, { questionEmbedding, chunks, cachedAt: new Date().toISOString() });
+    cache = 'miss';
   }
 
-  const chunks = await retrieveChunks(env, questionEmbedding);
-  await addCacheEntry(env.ASSISTANT_CACHE, {
-    questionEmbedding,
-    chunks,
-    cachedAt: new Date().toISOString(),
-  });
-
-  return Response.json({ chunks, cache: 'miss' });
+  const answer = await generateAnswer(env.AI, question, chunks);
+  return Response.json({ answer, chunks, cache });
 }
 
 export default {

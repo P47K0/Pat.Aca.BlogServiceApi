@@ -1,10 +1,9 @@
-/** One cached question → retrieved-chunks pairing. `chunks` stays untyped
- * here (`unknown`) since the real KnowledgeBase retrieval shape lands in the
- * next commit (the Cosmos cache-miss path) — this module only needs to store
- * and hand back whatever was cached, not interpret it. */
+import type { KnowledgeBaseChunk } from './cosmos-client';
+
+/** One cached question → retrieved-chunks pairing. */
 export interface CacheEntry {
   questionEmbedding: number[];
-  chunks: unknown;
+  chunks: KnowledgeBaseChunk[];
   cachedAt: string;
 }
 
