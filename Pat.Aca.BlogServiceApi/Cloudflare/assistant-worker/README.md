@@ -10,8 +10,10 @@ project's backlog item, not duplicated here. This is currently just a scaffold
 project's own conventions:
 
 1. Scaffold.
-2. Workers AI + KV bindings (this commit).
-3. Semantic-cache lookup (embed the question, compare against cached results).
+2. Workers AI + KV bindings.
+3. Semantic-cache lookup (this commit): `POST /ask` embeds the question and
+   checks the cache; a miss currently returns `501` since retrieval isn't
+   wired up yet.
 4. Cache-miss path: query the `KnowledgeBase` Cosmos container, populate the
    cache.
 5. Prompt assembly with scoping guardrails.
