@@ -12,8 +12,24 @@ compatibility_date = "2026-09-12"
 [observability]
 enabled = true
 
-# Bindings land in later commits, one concern at a time:
-# - Workers AI (`AI`) for query embedding + generation.
-# - Workers KV for the semantic cache ({questionEmbedding, chunks, cachedAt}).
-# - A shared secret (`wrangler secret put ...`) for the cache-invalidation
-#   endpoint ACA will call, mirroring ApiSecurity's existing pattern.
+# Workers AI — used for both query embedding (bge-m3, matching the model
+# already used to embed KnowledgeBase content locally via Ollama, see the
+# Phase 0 compatibility test in the backlog item) and answer generation.
+[ai]
+binding = "AI"
+
+# Semantic cache: {questionEmbedding, chunks, cachedAt} entries, brute-force
+# cosine-compared against an incoming question's embedding before falling
+# through to a live Cosmos VectorDistance() query.
+#
+# PLACEHOLDER ID — run `wrangler kv namespace create ASSISTANT_CACHE`
+# (requires `wrangler login`, not available in this sandbox — same
+# limitation as the original ARTICLES_FALLBACK namespace in api-proxy) and
+# paste the real id here before deploying.
+[[kv_namespaces]]
+binding = "ASSISTANT_CACHE"
+id = "REPLACE_ME_ASSISTANT_CACHE_KV_ID"
+
+# A shared secret (`wrangler secret put ...`) for the cache-invalidation
+# endpoint ACA will call still lands in a later commit, mirroring
+# ApiSecurity's existing pattern.

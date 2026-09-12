@@ -9,8 +9,8 @@ project's backlog item, not duplicated here. This is currently just a scaffold
 (`GET /healthz`) — built up in small, separately reviewable commits per the
 project's own conventions:
 
-1. Scaffold (this commit).
-2. Workers AI + KV bindings.
+1. Scaffold.
+2. Workers AI + KV bindings (this commit).
 3. Semantic-cache lookup (embed the question, compare against cached results).
 4. Cache-miss path: query the `KnowledgeBase` Cosmos container, populate the
    cache.
@@ -22,6 +22,10 @@ project's own conventions:
 
 ```bash
 npm install
+wrangler login                                    # one-time, not done in this sandbox
+wrangler kv namespace create ASSISTANT_CACHE      # then paste the real id into
+                                                   # wrangler.toml's ASSISTANT_CACHE
+                                                   # binding, replacing the placeholder
 ```
 
 ## Deploy
