@@ -10,13 +10,14 @@
  * and opens it; open/close/light-dismiss/Escape all come from the native
  * popover itself, same as TagCloud.
  *
- * The popover sizes itself to fit-content the instant showPopover() runs —
- * calling it right after setting .src raced the image's own load (still
- * 0x0 at that instant), so the backdrop appeared but the image never did.
- * decode() resolves once the image actually has pixels (immediately if
- * already cached), so showPopover() only runs once there's real content to
- * size around; .catch() still opens on a broken/failed image rather than
- * silently doing nothing. */
+ * Order matters here: showPopover() runs *before* .src is set, so the img
+ * is already part of the visible top layer once it starts loading — it
+ * then reflows on load exactly like any normal in-page image. Doing it the
+ * other way around (set .src, then open) raced the image's own load, and
+ * an earlier attempt at fixing that with img.decode() before opening
+ * turned out to hang indefinitely for at least one SVG (decode() needs a
+ * layout to decode into, which a hidden/not-yet-shown popover doesn't have
+ * — this ordering sidesteps that entirely instead of working around it). */
 export const IMAGE_LIGHTBOX_CLIENT_SCRIPT = `(function () {
   var content = document.getElementById('article-content');
   var lightbox = document.getElementById('image-lightbox');
@@ -27,14 +28,8 @@ export const IMAGE_LIGHTBOX_CLIENT_SCRIPT = `(function () {
   for (var i = 0; i < images.length; i++) {
     images[i].addEventListener('click', function (event) {
       lightboxImg.alt = event.target.alt || '';
+      lightbox.showPopover();
       lightboxImg.src = event.target.src;
-
-      var open = function () { lightbox.showPopover(); };
-      if (typeof lightboxImg.decode === 'function') {
-        lightboxImg.decode().then(open).catch(open);
-      } else {
-        open();
-      }
     });
   }
 })();`;
