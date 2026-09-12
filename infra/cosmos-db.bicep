@@ -28,6 +28,9 @@ param blogCommentsFunctionPrincipalId string = ''
 @description('Principal object ID of the KnowledgeBase-Writer app registration\'s service principal — a dedicated identity (deliberately separate from blogServicePrincipalId) Claude authenticates as to write embeddings directly into the KnowledgeBase container for the AI chat assistant project, bypassing the .NET API for this container entirely. Optional — leave blank to skip provisioning the KnowledgeBase container/role until ready.')
 param knowledgeBaseWriterPrincipalId string = ''
 
+@description('Principal object ID of the KnowledgeBase-Reader app registration\'s service principal — a dedicated, deliberately narrower identity the public-facing assistant-worker Cloudflare Worker authenticates as to query the KnowledgeBase container at retrieval time. Distinct from knowledgeBaseWriterPrincipalId: this identity is reachable by any site visitor\'s question indirectly, so it gets read+executeQuery only, never create/replace. Optional — leave blank to skip provisioning this role until the Worker\'s retrieval path is ready.')
+param knowledgeBaseReaderPrincipalId string = ''
+
 // EnableNoSQLVectorSearch (below) and knowledgeBaseContainer (further down)
 // are deployed together in this one template for simplicity, but the
 // capability can take up to ~15 minutes to actually propagate per
@@ -344,6 +347,51 @@ resource cosmosKnowledgeBaseWriterRoleAssignment 'Microsoft.DocumentDB/databaseA
   properties: {
     roleDefinitionId: cosmosKnowledgeBaseWriterRoleDefinition.id
     principalId: knowledgeBaseWriterPrincipalId
+    scope: '${account.id}/dbs/${assistantDatabase.name}/colls/${knowledgeBaseContainer.name}'
+  }
+}
+
+// Custom role for the KnowledgeBase-Reader app registration's service
+// principal (see knowledgeBaseReaderPrincipalId above) -- same
+// container-scoped fencing as cosmosKnowledgeBaseWriterRoleDefinition, but
+// deliberately narrower: read+executeQuery only, no create/replace. This
+// identity backs assistant-worker's live retrieval path (a public-facing
+// Cloudflare Worker, indirectly reachable by any site visitor's question),
+// a materially different trust boundary than KnowledgeBase-Writer (used
+// only from an authenticated authoring session) -- least-privilege here
+// means it can never modify KnowledgeBase content even if the Worker were
+// compromised. executeQuery is required, not optional, for this identity:
+// VectorDistance() retrieval is a SQL query, and (per
+// cosmosKnowledgeBaseWriterRoleDefinition's own comment) that's a separate
+// data action from plain read. Skipped entirely when
+// knowledgeBaseReaderPrincipalId is blank, same optional/blank-to-skip
+// pattern as knowledgeBaseWriterPrincipalId.
+resource cosmosKnowledgeBaseReaderRoleDefinition 'Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions@2024-05-15' = if (!empty(knowledgeBaseReaderPrincipalId)) {
+  parent: account
+  name: guid(account.id, 'KnowledgeBase reader role')
+  properties: {
+    roleName: 'KnowledgeBase Reader'
+    type: 'CustomRole'
+    assignableScopes: [
+      '${account.id}/dbs/${assistantDatabase.name}/colls/${knowledgeBaseContainer.name}'
+    ]
+    permissions: [
+      {
+        dataActions: [
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/read'
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/executeQuery'
+        ]
+      }
+    ]
+  }
+}
+
+resource cosmosKnowledgeBaseReaderRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(knowledgeBaseReaderPrincipalId)) {
+  parent: account
+  name: guid(account.id, knowledgeBaseReaderPrincipalId, 'KnowledgeBase reader role')
+  properties: {
+    roleDefinitionId: cosmosKnowledgeBaseReaderRoleDefinition.id
+    principalId: knowledgeBaseReaderPrincipalId
     scope: '${account.id}/dbs/${assistantDatabase.name}/colls/${knowledgeBaseContainer.name}'
   }
 }

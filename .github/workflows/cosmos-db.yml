@@ -49,6 +49,16 @@ on:
           skip; re-run later with this filled in without affecting anything
           else.
         required: false
+      knowledgeBaseReaderPrincipalId:
+        description: >
+          Service principal object ID of the KnowledgeBase-Reader app
+          registration — a narrower identity (read+executeQuery only) for
+          the public-facing assistant-worker Cloudflare Worker's retrieval
+          path, separate from knowledgeBaseWriterPrincipalId. Get it via
+          `az ad sp show --id <clientId> --query id -o tsv`. Leave blank to
+          skip; re-run later with this filled in without affecting anything
+          else.
+        required: false
 
 jobs:
   deploy:
@@ -79,6 +89,7 @@ jobs:
           AUTHOR_PRINCIPAL_ID: ${{ inputs.blogAuthorPrincipalId }}
           COMMENTS_FUNCTION_PRINCIPAL_ID: ${{ inputs.blogCommentsFunctionPrincipalId }}
           KNOWLEDGE_BASE_WRITER_PRINCIPAL_ID: ${{ inputs.knowledgeBaseWriterPrincipalId }}
+          KNOWLEDGE_BASE_READER_PRINCIPAL_ID: ${{ inputs.knowledgeBaseReaderPrincipalId }}
         run: |
           set -euo pipefail
 
@@ -98,6 +109,10 @@ jobs:
           if [ -n "$KNOWLEDGE_BASE_WRITER_PRINCIPAL_ID" ]; then
             echo "Granting KnowledgeBase container RBAC to the assistant writer principal: $KNOWLEDGE_BASE_WRITER_PRINCIPAL_ID"
             params+=(knowledgeBaseWriterPrincipalId="$KNOWLEDGE_BASE_WRITER_PRINCIPAL_ID")
+          fi
+          if [ -n "$KNOWLEDGE_BASE_READER_PRINCIPAL_ID" ]; then
+            echo "Granting KnowledgeBase container RBAC to the assistant reader principal: $KNOWLEDGE_BASE_READER_PRINCIPAL_ID"
+            params+=(knowledgeBaseReaderPrincipalId="$KNOWLEDGE_BASE_READER_PRINCIPAL_ID")
           fi
 
           az deployment group create \
