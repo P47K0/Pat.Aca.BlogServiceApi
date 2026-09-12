@@ -305,12 +305,17 @@ resource knowledgeBaseContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDataba
 // via assignableScopes, same fencing pattern as
 // cosmosCommentsWriterRoleDefinition below, so this identity gets zero
 // access to Articles/Comments/CommentsLeases even though it's a distinct
-// principal from blogServicePrincipalId. Grants create+replace+read: read
-// so the same identity can sanity-check what it just wrote (and later
-// power retrieval testing) without needing a second role, create for new
-// embeddings, replace for re-embedding a piece of content whose source
-// changed. Skipped entirely when knowledgeBaseWriterPrincipalId is blank,
-// same optional/blank-to-skip pattern as blogAuthorPrincipalId.
+// principal from blogServicePrincipalId. Grants create+replace+read+
+// executeQuery: read so the same identity can point-read what it just
+// wrote without needing a second role, create for new embeddings, replace
+// for re-embedding a piece of content whose source changed. executeQuery
+// is a separate data action from read -- point-reads (GET /docs/{id})
+// worked fine without it, but an actual SQL query (which VectorDistance()
+// retrieval fundamentally depends on) returned a 403 until this was added,
+// found via testing 2026-09-12, not caught beforehand since nothing had
+// tried a real query yet at that point. Skipped entirely when
+// knowledgeBaseWriterPrincipalId is blank, same optional/blank-to-skip
+// pattern as blogAuthorPrincipalId.
 resource cosmosKnowledgeBaseWriterRoleDefinition 'Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions@2024-05-15' = if (!empty(knowledgeBaseWriterPrincipalId)) {
   parent: account
   name: guid(account.id, 'KnowledgeBase writer role')
@@ -326,6 +331,7 @@ resource cosmosKnowledgeBaseWriterRoleDefinition 'Microsoft.DocumentDB/databaseA
           'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/create'
           'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/replace'
           'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/read'
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/executeQuery'
         ]
       }
     ]
