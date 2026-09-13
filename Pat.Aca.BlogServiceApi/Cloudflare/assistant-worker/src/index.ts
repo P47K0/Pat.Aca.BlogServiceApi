@@ -6,6 +6,7 @@ import { generateAnswer } from './lib/generation';
 import { checkRateLimit } from './lib/rate-limit';
 import { verifyTurnstile } from './lib/turnstile';
 import { detectFlagReason, logConversation } from './lib/conversation-log';
+import { withCors, handlePreflight } from './lib/cors';
 
 interface AskRequestBody {
   question?: unknown;
@@ -96,6 +97,12 @@ export default {
       return new Response('ok');
     }
 
+    if (url.pathname === '/ask' && request.method === 'OPTIONS') {
+      // The browser's own CORS preflight for the real POST below -- see
+      // cors.ts's own comment for why this is needed at all.
+      return handlePreflight(env.ALLOWED_ORIGIN);
+    }
+
     if (url.pathname === '/ask' && request.method === 'POST') {
       // Real visitor IP — this Worker is called directly from the browser
       // (fetch from the chat widget's client-side JS), not via a
@@ -103,7 +110,10 @@ export default {
       // CF-Connecting-IP here is already the original edge-set value, no
       // X-Real-Client-Ip forwarding needed.
       const clientIp = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-      return handleAsk(request, env, ctx, clientIp);
+      const response = await handleAsk(request, env, ctx, clientIp);
+      // Every response needs CORS headers, not just the success path --
+      // see cors.ts's own comment for why error responses matter here too.
+      return withCors(response, env.ALLOWED_ORIGIN);
     }
 
     return new Response('Not found', { status: 404 });
