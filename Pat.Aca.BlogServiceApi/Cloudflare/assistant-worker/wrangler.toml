@@ -2,10 +2,10 @@ name = "blog-assistant-worker"
 main = "src/index.ts"
 compatibility_date = "2026-09-12"
 
-# No custom domain — this Worker is called by the chat widget's client-side
-# JS (fetch from the browser), not addressed directly, so the default
-# *.workers.dev subdomain is enough for now. CORS will need scoping once the
-# real calling origin (blog.koorevaar.com) is wired up.
+# Custom domain (ai-assistant.koorevaar.com) configured directly in the
+# Cloudflare dashboard, not via a `routes` entry here -- this Worker is
+# called by the chat widget's client-side JS (fetch from the browser), so it
+# needs a stable address. See ALLOWED_ORIGIN below for CORS scoping.
 
 # Persists console.log/console.error output so the dashboard's Logs tab shows
 # past requests, matching ui-worker's [observability] setup.
@@ -28,6 +28,11 @@ id = "aa6b0fb3feb043b9a4187d11789a0300"
 # Cosmos account — same account the blog API uses, not sensitive.
 [vars]
 COSMOS_ACCOUNT_NAME = "cosmos-koorevaar"
+# The one browser origin allowed to call POST /ask cross-origin. The chat
+# widget lives on www.koorevaar.com, a separate site/project from this
+# repo's own blog.koorevaar.com -- not a secret, CORS is about telling
+# browsers which caller to trust, not about hiding this value.
+ALLOWED_ORIGIN = "https://www.koorevaar.com"
 
 # KnowledgeBase-Reader identity (see infra/cosmos-db.bicep's
 # knowledgeBaseReaderPrincipalId): a dedicated, read+executeQuery-only
@@ -52,8 +57,8 @@ COSMOS_ACCOUNT_NAME = "cosmos-koorevaar"
 # TURNSTILE_SECRET_KEY`, never here -- same off-wrangler.toml treatment as
 # the three KNOWLEDGEBASE_READER_* values above, for the same reason (a
 # Secret-type value survives the next `wrangler deploy`, a plain-text
-# dashboard var doesn't). Reuses the same Turnstile widget ui-worker already
-# has configured for blog.koorevaar.com's comment form -- one widget per
-# domain, not a second one for this Worker. Its paired site key belongs to
-# the chat widget UI (Phase 7, not yet built), so it isn't declared anywhere
-# in this Worker yet.
+# dashboard var doesn't). See env.ts's own comment on this field for which
+# Turnstile widget this needs to be paired with -- the chat widget lives on
+# www.koorevaar.com, not blog.koorevaar.com as originally assumed. This
+# Worker only ever needs the secret key; the paired site key belongs
+# wherever the widget actually renders.

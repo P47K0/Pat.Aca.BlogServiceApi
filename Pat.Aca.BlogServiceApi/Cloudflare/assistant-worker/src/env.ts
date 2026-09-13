@@ -9,6 +9,12 @@ export interface Env {
   /** Cosmos account name, e.g. "cosmos-koorevaar" — same account the blog
    * API uses, not a secret. Plain `[vars]` entry. */
   COSMOS_ACCOUNT_NAME: string;
+  /** The one browser origin allowed to call POST /ask cross-origin, e.g.
+   * "https://www.koorevaar.com" (the chat widget's real home — a separate
+   * site/project from this repo's own blog.koorevaar.com). Not a secret,
+   * a plain `[vars]` entry; CORS is about telling browsers which caller to
+   * trust, not about hiding this value. */
+  ALLOWED_ORIGIN: string;
   /** Tenant/client ID of the KnowledgeBase-Reader app registration — a
    * dedicated, read+executeQuery-only identity (see infra/cosmos-db.bicep's
    * knowledgeBaseReaderPrincipalId), deliberately narrower than
@@ -22,12 +28,15 @@ export interface Env {
    * Variables and Secrets (or `wrangler secret put
    * KNOWLEDGEBASE_READER_CLIENT_SECRET`), never in wrangler.toml. */
   KNOWLEDGEBASE_READER_CLIENT_SECRET: string;
-  /** Secret key for the Turnstile widget verified on POST /ask — same
-   * blog.koorevaar.com widget ui-worker already uses for comments (one
-   * Turnstile site per domain, reused here rather than provisioning a
-   * second widget for the same domain), set via `wrangler secret put
-   * TURNSTILE_SECRET_KEY`, never in wrangler.toml. The paired site key
-   * (public, embedded client-side) belongs to the chat widget itself —
-   * Phase 7, not yet built — so it has no home in this Worker yet. */
+  /** Secret key for the Turnstile widget verified on POST /ask, set via
+   * `wrangler secret put TURNSTILE_SECRET_KEY`, never in wrangler.toml.
+   * Originally assumed this would reuse ui-worker's blog.koorevaar.com
+   * comment-form widget, but the chat widget actually lives on
+   * www.koorevaar.com (ALLOWED_ORIGIN above) — a different site than the
+   * blog, so that widget's allowed hostnames need www.koorevaar.com added
+   * (or a dedicated widget created instead), whichever the Turnstile
+   * dashboard config ends up being. Either way this Worker only ever needs
+   * the secret key, never the paired site key -- that belongs wherever the
+   * widget actually renders, i.e. the www.koorevaar.com project. */
   TURNSTILE_SECRET_KEY: string;
 }
