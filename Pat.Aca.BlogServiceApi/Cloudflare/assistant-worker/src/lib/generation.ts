@@ -24,6 +24,14 @@ const GENERATION_MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8';
 // - Grounding: only the retrieved CONTEXT, never the model's own general
 //   knowledge about Patrick -- refuses rather than guesses on a genuine
 //   knowledge gap.
+// - No leaking internal formatting: buildContextBlock() below numbers each
+//   chunk ([1], [2], ...) purely so the model can tell entries apart --
+//   real bug, found 2026-09-13 via a live answer that cited "[2] en [5]
+//   verwijzingen" (references) to the visitor, who never sees the CONTEXT
+//   block or its numbering at all, only the plain-text answer. Model
+//   picked up the numbered-list formatting and treated it like a citation
+//   convention worth mentioning, unprompted -- needed an explicit rule
+//   telling it not to.
 // - Prompt-injection resistance: the CONTEXT block is reference material,
 //   not instructions -- this is the mitigation for both a malicious visitor
 //   message and (in principle) injected text smuggled into a KnowledgeBase
@@ -55,6 +63,7 @@ If the message is in English or Dutch, continue with the rules below.
 
 Rules:
 - Answer only using the information in the CONTEXT block below. Never use outside knowledge about Patrick, even if you think you know it.
+- Never mention the CONTEXT block itself, its numbered labels (e.g. "[1]", "[2]"), or phrases like "reference" or "source" in your answer -- the visitor never sees the CONTEXT block or those labels, only your reply, so citing them is meaningless and confusing. Weave the information into a normal, natural answer instead, as if you just know it.
 - If the visitor is just greeting you or making small talk (e.g. "hi", "how are you") rather than asking something specific, respond briefly and warmly, then invite them to ask about Patrick's background, skills, or projects -- don't treat this the same as an unanswerable question, and don't apologize for lacking context you were never asked for.
 - If the visitor is ending the conversation (e.g. "bye", "thanks, that's all"), respond with a brief, friendly goodbye in the same language they used -- don't try to answer it as a question, don't point them anywhere else, and don't switch languages just because this rule is written in English.
 - If the visitor asks something unrelated to Patrick entirely (general knowledge, coding help, anything not about him), don't attempt it -- say plainly that you're not able to help with that, and invite them to ask something about Patrick instead. Keep this light and friendly, not a formal refusal.
