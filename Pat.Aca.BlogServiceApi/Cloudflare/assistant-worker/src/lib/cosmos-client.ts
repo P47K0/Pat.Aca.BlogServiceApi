@@ -102,12 +102,15 @@ async function queryPartition(
       Accept: 'application/json',
     },
     body: JSON.stringify({
-      // Ascending VectorDistance = nearest-first for the cosine distance
-      // function configured on KnowledgeBase's vector policy (see
-      // infra/cosmos-db.bicep) — not yet confirmed against a real query's
-      // actual result order (that's Phase 3's retrieval sanity check,
-      // still open); flag and fix here if results come back reversed once
-      // this runs against real data.
+      // Bare `ORDER BY VectorDistance(...)`, no ASC/DESC keyword: Cosmos's
+      // query engine handles vector-search ordering specially and this
+      // form is documented to mean nearest-first regardless of the metric's
+      // own raw value direction -- confirmed empirically (2026-09-13) by
+      // querying with a chunk's own near-identical text and getting that
+      // exact chunk back first, at score ~0.996. That same session found
+      // `score` itself is raw cosine SIMILARITY for this container (higher
+      // = more similar), not distance -- see retrieveChunks's own comment
+      // for why that distinction mattered beyond just this one query.
       query: `SELECT TOP ${topK} c.id, c.sourceType, c.sourceSlug, c.text, VectorDistance(c.embedding, @embedding) AS score
               FROM c ORDER BY VectorDistance(c.embedding, @embedding)`,
       parameters: [{ name: '@embedding', value: embedding }],
@@ -127,7 +130,22 @@ async function queryPartition(
 /** Retrieves the top-k chunks across both KnowledgeBase partitions
  * ("article" and "profile"), queried separately then merged and re-sorted
  * by score client-side — see queryPartition's doc comment for why this
- * can't be a single cross-partition query. */
+ * can't be a single cross-partition query.
+ *
+ * Real bug, found 2026-09-13 via a live report of a thin/wrong-seeming
+ * answer, not caught by Phase 3/4/5's earlier (informal, small-sample)
+ * ordering checks: this used to sort `(a, b) => a.score - b.score`
+ * (ascending) on the assumption `score` behaved like a distance (lower =
+ * closer). It doesn't -- `score` is raw cosine similarity for this
+ * container (higher = more similar), confirmed by querying with a chunk's
+ * own near-identical text and getting that chunk back with score ~0.996.
+ * Each per-partition queryPartition() call was already correct on its own
+ * (Cosmos's own bare `ORDER BY VectorDistance(...)` handles the "nearest
+ * first" ordering specially, regardless of the metric's raw direction --
+ * see that function's own comment) -- this merge step's own re-sort was
+ * the only thing backwards, silently selecting the worst of the two
+ * partitions' candidates as the final top-k instead of the best, for
+ * every single question ever asked since this Worker went live. */
 export async function retrieveChunks(
   env: Env,
   embedding: number[],
@@ -139,6 +157,6 @@ export async function retrieveChunks(
 
   return perPartition
     .flat()
-    .sort((a, b) => a.score - b.score)
+    .sort((a, b) => b.score - a.score)
     .slice(0, topK);
 }
