@@ -5,16 +5,18 @@ import { retrieveChunks, type KnowledgeBaseChunk } from './lib/cosmos-client';
 import { generateAnswer } from './lib/generation';
 import { checkRateLimit } from './lib/rate-limit';
 import { verifyTurnstile } from './lib/turnstile';
+import { detectFlagReason, logConversation } from './lib/conversation-log';
 
 interface AskRequestBody {
   question?: unknown;
   turnstileToken?: unknown;
+  allowLogging?: unknown;
 }
 
 /** POST /ask — embeds the question, checks the semantic cache, and on a
  * miss queries KnowledgeBase directly (populating the cache for next time),
  * then generates a grounded answer from whichever chunks were found. */
-async function handleAsk(request: Request, env: Env, clientIp: string): Promise<Response> {
+async function handleAsk(request: Request, env: Env, ctx: ExecutionContext, clientIp: string): Promise<Response> {
   // Cheapest possible fail point: rejects an over-quota IP before spending
   // anything on embedding/retrieval/generation, all of which cost real
   // Workers AI neurons or Cosmos RUs.
@@ -61,11 +63,33 @@ async function handleAsk(request: Request, env: Env, clientIp: string): Promise<
   }
 
   const answer = await generateAnswer(env.AI, question, chunks);
+
+  // Not stored by default -- allowLogging is the future chat widget's own
+  // opt-in toggle (disclosed plainly next to it, Phase 7 concern, not
+  // plumbed anywhere yet) -- except a flagged input is logged regardless,
+  // so real abuse of this public endpoint isn't invisible just because
+  // nobody opted in. ctx.waitUntil so a slow/failed KV write never delays
+  // or breaks the answer actually being returned to the visitor.
+  const allowLogging = body?.allowLogging === true;
+  const flagReason = detectFlagReason(question);
+  if (allowLogging || flagReason) {
+    ctx.waitUntil(
+      logConversation(env.ASSISTANT_CACHE, {
+        question,
+        answer,
+        cache,
+        allowLogging,
+        flagReason,
+        loggedAt: new Date().toISOString(),
+      }).catch((error) => console.error('Conversation logging failed:', error)),
+    );
+  }
+
   return Response.json({ answer, chunks, cache });
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === '/healthz') {
@@ -79,7 +103,7 @@ export default {
       // CF-Connecting-IP here is already the original edge-set value, no
       // X-Real-Client-Ip forwarding needed.
       const clientIp = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-      return handleAsk(request, env, clientIp);
+      return handleAsk(request, env, ctx, clientIp);
     }
 
     return new Response('Not found', { status: 404 });
