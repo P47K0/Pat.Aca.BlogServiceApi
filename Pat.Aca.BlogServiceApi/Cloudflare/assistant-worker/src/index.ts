@@ -3,6 +3,7 @@ import { embedText } from './lib/embeddings';
 import { findCachedMatch, addCacheEntry } from './lib/semantic-cache';
 import { retrieveChunks, type KnowledgeBaseChunk } from './lib/cosmos-client';
 import { generateAnswer } from './lib/generation';
+import { checkRateLimit } from './lib/rate-limit';
 
 interface AskRequestBody {
   question?: unknown;
@@ -11,7 +12,15 @@ interface AskRequestBody {
 /** POST /ask — embeds the question, checks the semantic cache, and on a
  * miss queries KnowledgeBase directly (populating the cache for next time),
  * then generates a grounded answer from whichever chunks were found. */
-async function handleAsk(request: Request, env: Env): Promise<Response> {
+async function handleAsk(request: Request, env: Env, clientIp: string): Promise<Response> {
+  // Cheapest possible fail point: rejects an over-quota IP before spending
+  // anything on embedding/retrieval/generation, all of which cost real
+  // Workers AI neurons or Cosmos RUs.
+  const withinLimit = await checkRateLimit(env.ASSISTANT_CACHE, clientIp);
+  if (!withinLimit) {
+    return Response.json({ error: 'Too many requests, please try again later.' }, { status: 429 });
+  }
+
   const body = (await request.json().catch(() => null)) as AskRequestBody | null;
   const question = body?.question;
   if (typeof question !== 'string' || question.trim() === '') {
@@ -45,7 +54,13 @@ export default {
     }
 
     if (url.pathname === '/ask' && request.method === 'POST') {
-      return handleAsk(request, env);
+      // Real visitor IP — this Worker is called directly from the browser
+      // (fetch from the chat widget's client-side JS), not via a
+      // Worker-to-Worker chain like ui-worker -> api-proxy, so
+      // CF-Connecting-IP here is already the original edge-set value, no
+      // X-Real-Client-Ip forwarding needed.
+      const clientIp = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+      return handleAsk(request, env, clientIp);
     }
 
     return new Response('Not found', { status: 404 });
