@@ -49,8 +49,10 @@ ALLOWED_ORIGIN = "https://www.koorevaar.com"
 # Secret-type value persists independently of what's deployed, same as
 # ARTICLES_API_KEY in api-proxy.
 #
-# A shared secret for the cache-invalidation endpoint ACA will call still
-# lands in a later commit, mirroring ApiSecurity's existing pattern.
+# CACHE_INVALIDATION_SECRET (Phase 5): checked on POST
+# /internal/invalidate-cache, called by ACA (not the chat widget) right
+# after a successful article create/update. Same off-wrangler.toml Secret
+# treatment as everything else in this section, for the same reason.
 
 # TURNSTILE_SECRET_KEY (Phase 6): verified on every POST /ask. Set via the
 # dashboard's Variables and Secrets or `wrangler secret put
