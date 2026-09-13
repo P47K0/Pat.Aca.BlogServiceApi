@@ -41,6 +41,14 @@ project's own conventions:
    for an input that looks like abuse or a prompt-injection attempt. One KV
    key per logged entry (90-day `expirationTtl`), same `ASSISTANT_CACHE`
    namespace.
+10. Phase 5, cache invalidation: `POST /internal/invalidate-cache`
+    (`src/lib/cache-invalidation.ts`), guarded by a shared secret (see
+    `wrangler.toml`), called by ACA right after a successful article
+    create/update — bumps a global `content-updated-at` KV key. Every
+    semantic-cache entry cached before that bump is treated as stale on its
+    next lookup (`src/lib/semantic-cache.ts`) and dropped from storage —
+    coarse, whole-cache invalidation by design, not a per-article reverse
+    index.
 
 ## Setup
 
@@ -64,6 +72,12 @@ its principal ID.
 Turnstile widget already configured for `blog.koorevaar.com` (see
 `ui-worker`'s own setup notes for where that secret lives), not a new widget
 for this Worker.
+
+`CACHE_INVALIDATION_SECRET` is also set the same off-`wrangler.toml` way —
+pick any random value and configure the identical value as ACA's
+`AssistantWorker:InvalidateCacheKey` (see the main API project's own
+`appsettings.json`/environment config), since this is a shared secret both
+sides must agree on, not one ACA reads back from here.
 
 ## Deploy
 

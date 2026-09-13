@@ -70,6 +70,25 @@ else
 var commentSettings = builder.Configuration.GetSection("Comments").Get<CommentSettings>() ?? new CommentSettings();
 builder.Services.AddSingleton(commentSettings);
 
+// Phase 5 of the AI assistant project: notifies assistant-worker to
+// invalidate its semantic cache after a write here changes article
+// content. Only registered as the real HTTP-calling implementation when
+// InvalidateCacheUrl is actually set — an unconfigured environment (e.g.
+// local dev) gets the no-op instead, same configured-vs-not branching as
+// IArticleRepository above, so the write endpoints below can call
+// IAssistantCacheInvalidator unconditionally.
+var assistantWorkerSettings = builder.Configuration.GetSection("AssistantWorker").Get<AssistantWorkerSettings>()
+    ?? new AssistantWorkerSettings();
+builder.Services.AddSingleton(assistantWorkerSettings);
+if (!string.IsNullOrWhiteSpace(assistantWorkerSettings.InvalidateCacheUrl))
+{
+    builder.Services.AddHttpClient<IAssistantCacheInvalidator, AssistantWorkerCacheInvalidator>();
+}
+else
+{
+    builder.Services.AddSingleton<IAssistantCacheInvalidator, NoOpAssistantCacheInvalidator>();
+}
+
 const string ArticlesRateLimiterPolicy = "articles";
 const string ArticlesWriteRateLimiterPolicy = "articles-write";
 const string CommentsWriteRateLimiterPolicy = "comments-write";
@@ -330,7 +349,10 @@ app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleReposit
 // replaces manual hand-entry into Cosmos as the normal authoring path.
 // No API-key filter here on purpose; the Cloudflare Worker never writes.
 
-app.MapPost("/articles", async Task<IResult> (ArticleWriteRequest request, IArticleRepository articleRepository) =>
+app.MapPost("/articles", async Task<IResult> (
+    ArticleWriteRequest request,
+    IArticleRepository articleRepository,
+    IAssistantCacheInvalidator assistantCacheInvalidator) =>
 {
     var errors = ArticleWriteValidation.Validate(request);
     if (errors.Count > 0)
@@ -347,12 +369,20 @@ app.MapPost("/articles", async Task<IResult> (ArticleWriteRequest request, IArti
         return Results.Problem($"An article with slug '{request.Slug}' already exists.", statusCode: StatusCodes.Status409Conflict);
     }
 
+    // Best-effort, never blocks/fails the response on this — see
+    // IAssistantCacheInvalidator's own doc comment.
+    await assistantCacheInvalidator.InvalidateAsync();
+
     return Results.Created($"/articles/{created.Slug}", created);
 })
     .RequireRateLimiting(ArticlesWriteRateLimiterPolicy)
     .RequireAuthorization(ArticlesWriteAuthorizationPolicy);
 
-app.MapPut("/articles/{slug}", async Task<IResult> (string slug, ArticleWriteRequest request, IArticleRepository articleRepository) =>
+app.MapPut("/articles/{slug}", async Task<IResult> (
+    string slug,
+    ArticleWriteRequest request,
+    IArticleRepository articleRepository,
+    IAssistantCacheInvalidator assistantCacheInvalidator) =>
 {
     if (string.IsNullOrEmpty(slug))
     {
@@ -376,6 +406,10 @@ app.MapPut("/articles/{slug}", async Task<IResult> (string slug, ArticleWriteReq
         // Update-only, not upsert — per the BRD, PUT never creates.
         return Results.Problem("Article not found", statusCode: StatusCodes.Status404NotFound);
     }
+
+    // Best-effort, never blocks/fails the response on this — see
+    // IAssistantCacheInvalidator's own doc comment.
+    await assistantCacheInvalidator.InvalidateAsync();
 
     return Results.Json(updated);
 })

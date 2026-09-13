@@ -7,6 +7,9 @@ import { checkRateLimit } from './lib/rate-limit';
 import { verifyTurnstile } from './lib/turnstile';
 import { detectFlagReason, logConversation } from './lib/conversation-log';
 import { withCors, handlePreflight } from './lib/cors';
+import { bumpContentVersion } from './lib/cache-invalidation';
+
+const CACHE_INVALIDATION_KEY_HEADER = 'X-Cache-Invalidation-Key';
 
 interface AskRequestBody {
   question?: unknown;
@@ -89,6 +92,24 @@ async function handleAsk(request: Request, env: Env, ctx: ExecutionContext, clie
   return Response.json({ answer, chunks, cache });
 }
 
+/** POST /internal/invalidate-cache — Phase 5. Called by ACA right after a
+ * successful article create/update, never by a browser (no CORS/Turnstile/
+ * rate-limit on this route: it's not reachable from the chat widget at all,
+ * only from server-to-server calls carrying the shared secret below).
+ * Bumps the global content-updated-at version key so semantic-cache.ts
+ * treats every entry cached before this moment as stale. */
+async function handleInvalidateCache(request: Request, env: Env): Promise<Response> {
+  const providedKey = request.headers.get(CACHE_INVALIDATION_KEY_HEADER);
+  // An unconfigured secret must fail closed, not be read as "auth disabled"
+  // -- same convention as the .NET API's own ApiSecurity.RequireApiKey.
+  if (!env.CACHE_INVALIDATION_SECRET || providedKey !== env.CACHE_INVALIDATION_SECRET) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  await bumpContentVersion(env.ASSISTANT_CACHE);
+  return new Response('ok');
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -114,6 +135,10 @@ export default {
       // Every response needs CORS headers, not just the success path --
       // see cors.ts's own comment for why error responses matter here too.
       return withCors(response, env.ALLOWED_ORIGIN);
+    }
+
+    if (url.pathname === '/internal/invalidate-cache' && request.method === 'POST') {
+      return handleInvalidateCache(request, env);
     }
 
     return new Response('Not found', { status: 404 });

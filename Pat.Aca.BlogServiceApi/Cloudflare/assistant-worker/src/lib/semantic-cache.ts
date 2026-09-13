@@ -1,4 +1,5 @@
 import type { KnowledgeBaseChunk } from './cosmos-client';
+import { getContentVersion } from './cache-invalidation';
 
 /** One cached question → retrieved-chunks pairing. */
 export interface CacheEntry {
@@ -42,18 +43,31 @@ async function readCacheEntries(kv: KVNamespace): Promise<CacheEntry[]> {
 /** Brute-force scans the cache for the closest entry to `questionEmbedding`,
  * returning it only if it clears SIMILARITY_THRESHOLD — otherwise null, which
  * the caller treats as a cache miss (falls through to a live Cosmos query).
- * Cache staleness (an edited article invalidating a cached answer) isn't
- * handled here yet — that's the global content-updated-at version key from
- * a later phase, not this lookup. */
+ *
+ * Phase 5: entries cached before the last content-updated-at bump (see
+ * cache-invalidation.ts) are treated as if they don't exist, rather than
+ * risking a stale answer for content that's since been edited. Comparing
+ * `cachedAt`/`content-updated-at` as plain strings works because both come
+ * from the same `new Date().toISOString()` format, which sorts
+ * lexicographically the same as chronologically. Stale entries found this
+ * way are dropped from storage here too (lazy cleanup on next access) so a
+ * bump doesn't leave dead weight in the KV value forever — same
+ * read-then-write, non-atomic acceptance as addCacheEntry below. */
 export async function findCachedMatch(
   kv: KVNamespace,
   questionEmbedding: number[],
 ): Promise<CacheEntry | null> {
   const entries = await readCacheEntries(kv);
+  const contentVersion = await getContentVersion(kv);
+  const live = contentVersion ? entries.filter((entry) => entry.cachedAt >= contentVersion) : entries;
+
+  if (live.length !== entries.length) {
+    await kv.put(CACHE_KV_KEY, JSON.stringify(live));
+  }
 
   let best: CacheEntry | null = null;
   let bestScore = -Infinity;
-  for (const entry of entries) {
+  for (const entry of live) {
     const score = cosineSimilarity(questionEmbedding, entry.questionEmbedding);
     if (score > bestScore) {
       best = entry;

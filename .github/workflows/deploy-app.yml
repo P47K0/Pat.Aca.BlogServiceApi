@@ -24,6 +24,13 @@ jobs:
       APP_NAME: blog-service-api
       ARTICLES_API_KEY: ${{ secrets.ARTICLES_API_KEY }}
       COSMOS_ENDPOINT_URI: ${{ secrets.COSMOS_ENDPOINT_URI }}
+      # Phase 5 of the AI assistant project: lets this API tell
+      # assistant-worker to invalidate its semantic cache after an article
+      # write. ASSISTANT_INVALIDATE_CACHE_KEY must match that Worker's own
+      # CACHE_INVALIDATION_SECRET (set via `wrangler secret put`) -- see
+      # Pat.Aca.BlogServiceApi/Cloudflare/assistant-worker/README.md.
+      ASSISTANT_INVALIDATE_CACHE_URL: ${{ secrets.ASSISTANT_INVALIDATE_CACHE_URL }}
+      ASSISTANT_INVALIDATE_CACHE_KEY: ${{ secrets.ASSISTANT_INVALIDATE_CACHE_KEY }}
 
     steps:
       - name: Checkout
@@ -77,6 +84,8 @@ jobs:
                 "CosmosDb__EndpointUri=$COSMOS_ENDPOINT_URI" \
                 "CosmosDb__Database=ArticlesDB" \
                 "CosmosDb__Container=Articles" \
+                "AssistantWorker__InvalidateCacheUrl=$ASSISTANT_INVALIDATE_CACHE_URL" \
+                "AssistantWorker__InvalidateCacheKey=$ASSISTANT_INVALIDATE_CACHE_KEY" \
                 "ASPNETCORE_ENVIRONMENT=Production"
           else
             echo "Container App does not exist → Creating..."
@@ -94,6 +103,8 @@ jobs:
                 "CosmosDb__EndpointUri=$COSMOS_ENDPOINT_URI" \
                 "CosmosDb__Database=ArticlesDB" \
                 "CosmosDb__Container=Articles" \
+                "AssistantWorker__InvalidateCacheUrl=$ASSISTANT_INVALIDATE_CACHE_URL" \
+                "AssistantWorker__InvalidateCacheKey=$ASSISTANT_INVALIDATE_CACHE_KEY" \
                 "ASPNETCORE_ENVIRONMENT=Production" \
               --cpu 0.25 \
               --memory 0.5Gi \

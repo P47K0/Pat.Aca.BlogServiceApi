@@ -40,4 +40,16 @@ export interface Env {
    * paired site key -- that belongs wherever the widget actually renders,
    * i.e. the www.koorevaar.com project, not here. */
   TURNSTILE_SECRET_KEY: string;
+  /** Shared secret ACA presents (as the X-Cache-Invalidation-Key header) when
+   * calling POST /internal/invalidate-cache right after a successful article
+   * create/update — the trigger point for Phase 5's cache invalidation, since
+   * that's the one write path ACA itself knows about (KnowledgeBase chunk/
+   * profile-fact writes happen client-side, outside ACA, per this project's
+   * embed-at-write-time convention, and aren't covered by this call). Set via
+   * `wrangler secret put CACHE_INVALIDATION_SECRET`, never in wrangler.toml.
+   * An empty/missing value fails the endpoint closed (401) rather than
+   * silently accepting any caller — mirrors ApiSecurity.RequireApiKey's same
+   * fail-closed convention on the .NET side, just enforced here instead
+   * since this time the .NET API is the caller, not the callee. */
+  CACHE_INVALIDATION_SECRET: string;
 }
