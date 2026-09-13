@@ -30,13 +30,14 @@ export interface Env {
   KNOWLEDGEBASE_READER_CLIENT_SECRET: string;
   /** Secret key for the Turnstile widget verified on POST /ask, set via
    * `wrangler secret put TURNSTILE_SECRET_KEY`, never in wrangler.toml.
-   * Originally assumed this would reuse ui-worker's blog.koorevaar.com
-   * comment-form widget, but the chat widget actually lives on
-   * www.koorevaar.com (ALLOWED_ORIGIN above) — a different site than the
-   * blog, so that widget's allowed hostnames need www.koorevaar.com added
-   * (or a dedicated widget created instead), whichever the Turnstile
-   * dashboard config ends up being. Either way this Worker only ever needs
-   * the secret key, never the paired site key -- that belongs wherever the
-   * widget actually renders, i.e. the www.koorevaar.com project. */
+   * Not ui-worker's blog.koorevaar.com comment-form widget (that was the
+   * original guess, wrong) -- the www.koorevaar.com project already had
+   * its own separate Turnstile widget, unrelated to the blog, originally
+   * set up for a human-visits counter on that site. Reused here since it
+   * was already scoped to the right hostname, rather than adding
+   * www.koorevaar.com to a blog-scoped widget or creating a third one.
+   * This Worker only ever needs that widget's secret key, never its
+   * paired site key -- that belongs wherever the widget actually renders,
+   * i.e. the www.koorevaar.com project, not here. */
   TURNSTILE_SECRET_KEY: string;
 }
