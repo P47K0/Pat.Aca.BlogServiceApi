@@ -4,9 +4,11 @@ import { findCachedMatch, addCacheEntry } from './lib/semantic-cache';
 import { retrieveChunks, type KnowledgeBaseChunk } from './lib/cosmos-client';
 import { generateAnswer } from './lib/generation';
 import { checkRateLimit } from './lib/rate-limit';
+import { verifyTurnstile } from './lib/turnstile';
 
 interface AskRequestBody {
   question?: unknown;
+  turnstileToken?: unknown;
 }
 
 /** POST /ask — embeds the question, checks the semantic cache, and on a
@@ -25,6 +27,23 @@ async function handleAsk(request: Request, env: Env, clientIp: string): Promise<
   const question = body?.question;
   if (typeof question !== 'string' || question.trim() === '') {
     return Response.json({ error: 'question is required' }, { status: 400 });
+  }
+
+  // Stubbed in ahead of the chat widget itself (Phase 7, not yet built):
+  // nothing can supply a real token until that widget renders the Turnstile
+  // challenge client-side and posts its response here, so this rejects
+  // every real request until then -- expected and fine, this Worker isn't
+  // reachable from a live UI yet either way. Checked after the cheap
+  // question-shape validation above but before any embedding/retrieval/
+  // generation spend below.
+  const turnstileToken = body?.turnstileToken;
+  const turnstileOk = await verifyTurnstile(
+    env.TURNSTILE_SECRET_KEY,
+    typeof turnstileToken === 'string' ? turnstileToken : '',
+    clientIp,
+  );
+  if (!turnstileOk) {
+    return Response.json({ error: 'Turnstile verification failed.' }, { status: 403 });
   }
 
   const questionEmbedding = await embedText(env.AI, question);
