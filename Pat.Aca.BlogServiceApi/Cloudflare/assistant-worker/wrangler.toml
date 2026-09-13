@@ -46,3 +46,14 @@ COSMOS_ACCOUNT_NAME = "cosmos-koorevaar"
 #
 # A shared secret for the cache-invalidation endpoint ACA will call still
 # lands in a later commit, mirroring ApiSecurity's existing pattern.
+
+# TURNSTILE_SECRET_KEY (Phase 6): verified on every POST /ask. Set via the
+# dashboard's Variables and Secrets or `wrangler secret put
+# TURNSTILE_SECRET_KEY`, never here -- same off-wrangler.toml treatment as
+# the three KNOWLEDGEBASE_READER_* values above, for the same reason (a
+# Secret-type value survives the next `wrangler deploy`, a plain-text
+# dashboard var doesn't). Reuses the same Turnstile widget ui-worker already
+# has configured for blog.koorevaar.com's comment form -- one widget per
+# domain, not a second one for this Worker. Its paired site key belongs to
+# the chat widget UI (Phase 7, not yet built), so it isn't declared anywhere
+# in this Worker yet.

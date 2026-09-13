@@ -25,6 +25,22 @@ project's own conventions:
    worth a deliberate read in that file before this ever goes live — it's
    the one piece of this Worker that speaks on your behalf.
 6. Return JSON — no UI yet (the chat widget itself is a later phase).
+7. Phase 6, rate limiting: per-IP fixed-window limit on `POST /ask`
+   (`src/lib/rate-limit.ts`), KV-backed under a new key prefix in the
+   existing `ASSISTANT_CACHE` namespace, checked before any embedding/
+   retrieval/generation spend.
+8. Phase 6, Turnstile: `POST /ask` now requires a `turnstileToken` field,
+   verified server-side (`src/lib/turnstile.ts`) against the same
+   `blog.koorevaar.com` widget `ui-worker` already uses for comments.
+   Stubbed in ahead of the chat widget itself (Phase 7) — nothing can supply
+   a real token until that widget exists, so every real request 403s for
+   now, which is expected.
+9. Phase 6, conversation logging: not stored by default; an `allowLogging`
+   field in the request body opts a conversation in, and a cheap regex/
+   keyword scan (`src/lib/conversation-log.ts`) forces logging regardless
+   for an input that looks like abuse or a prompt-injection attempt. One KV
+   key per logged entry (90-day `expirationTtl`), same `ASSISTANT_CACHE`
+   namespace.
 
 ## Setup
 
@@ -43,6 +59,11 @@ registration exists (create it by hand in the personal Entra tenant, same as
 `KnowledgeBase-Writer` — see `infra/cosmos-db.bicep`'s
 `knowledgeBaseReaderPrincipalId`) and `cosmos-db.yml` has been re-run with
 its principal ID.
+
+`TURNSTILE_SECRET_KEY` is set the same off-`wrangler.toml` way — reuses the
+Turnstile widget already configured for `blog.koorevaar.com` (see
+`ui-worker`'s own setup notes for where that secret lives), not a new widget
+for this Worker.
 
 ## Deploy
 

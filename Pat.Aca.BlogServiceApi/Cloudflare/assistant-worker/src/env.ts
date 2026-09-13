@@ -22,4 +22,12 @@ export interface Env {
    * Variables and Secrets (or `wrangler secret put
    * KNOWLEDGEBASE_READER_CLIENT_SECRET`), never in wrangler.toml. */
   KNOWLEDGEBASE_READER_CLIENT_SECRET: string;
+  /** Secret key for the Turnstile widget verified on POST /ask — same
+   * blog.koorevaar.com widget ui-worker already uses for comments (one
+   * Turnstile site per domain, reused here rather than provisioning a
+   * second widget for the same domain), set via `wrangler secret put
+   * TURNSTILE_SECRET_KEY`, never in wrangler.toml. The paired site key
+   * (public, embedded client-side) belongs to the chat widget itself —
+   * Phase 7, not yet built — so it has no home in this Worker yet. */
+  TURNSTILE_SECRET_KEY: string;
 }
