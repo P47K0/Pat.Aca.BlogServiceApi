@@ -23,6 +23,14 @@ namespace Pat.Aca.BlogServiceApi
         Task<Article?> GetArticleBySlugAsync(string slug);
 
         /// <summary>
+        /// Count of published articles only — same future-publishedAt
+        /// exclusion as <see cref="GetArticlesAsync"/>, without paying for
+        /// every article's full payload just to read a length. Backs the
+        /// site homepage's blog-post counter.
+        /// </summary>
+        Task<int> GetArticleCountAsync();
+
+        /// <summary>
         /// Atomically-intended increment of an article's view count. Returns the
         /// updated article, or null if <paramref name="slug"/> doesn't match a
         /// published article (mirrors <see cref="GetArticleBySlugAsync"/>'s
