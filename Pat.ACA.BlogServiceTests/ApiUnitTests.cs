@@ -202,6 +202,17 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task InMemoryArticleRepository_GetArticleCountAsync_matches_GetArticlesAsync_count()
+        {
+            var repository = new InMemoryArticleRepository();
+
+            var count = await repository.GetArticleCountAsync();
+            var articles = await repository.GetArticlesAsync();
+
+            Assert.Equal(articles.Count, count);
+        }
+
+        [Fact]
         public async Task InMemoryArticleRepository_GetArticleBySlugAsync_finds_existing_article()
         {
             var repository = new InMemoryArticleRepository();

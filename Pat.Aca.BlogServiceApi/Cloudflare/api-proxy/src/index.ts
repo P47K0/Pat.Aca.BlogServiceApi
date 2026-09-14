@@ -242,6 +242,62 @@ async function revalidate(env: Env, pathname: string, search: string, key: Reque
   }
 }
 
+// --- Article count -----------------------------------------------------
+//
+// GET /articles/count backs the site's blog-post counter with a plain
+// integer instead of the full article list. Deliberately NOT routed through
+// fetchAndRender/revalidate above: both assume an Article or Article[] JSON
+// body and unconditionally markdown-render a `content` field via
+// marked.parse(), which throws given this route's actual `{ count }` shape.
+// Also deliberately checked before ARTICLE_SLUG_PATH in the dispatcher below
+// -- that regex would otherwise treat "count" as an article slug and route
+// here into the wrong (article-shaped) machinery entirely.
+const ARTICLES_COUNT_PATH = '/articles/count';
+
+async function fetchCount(env: Env): Promise<Response> {
+  const upstreamUrl = new URL(ARTICLES_COUNT_PATH, env.API_BASE_URL);
+  const upstreamResponse = await fetch(upstreamUrl.toString(), {
+    method: 'GET',
+    headers: {
+      [API_KEY_HEADER]: env.ARTICLES_API_KEY,
+      Accept: 'application/json',
+    },
+  });
+
+  const headers = new Headers(upstreamResponse.headers);
+  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+    headers.set(key, value);
+  }
+  if (upstreamResponse.ok) {
+    headers.set(CACHED_AT_HEADER, String(Date.now()));
+  }
+  return new Response(upstreamResponse.body, { status: upstreamResponse.status, headers });
+}
+
+/** Same stale-while-revalidate shape as proxyArticlesRequest, just its own
+ * small self-contained version rather than reusing the article-shaped
+ * fetchAndRender/revalidate -- a failed background refresh here simply
+ * leaves the existing cached count in place, same failure behavior as
+ * revalidate(). */
+async function proxyArticleCountRequest(env: Env, ctx: ExecutionContext, key: Request): Promise<Response> {
+  const cached = await cache.match(key);
+  if (cached) {
+    const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
+    if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
+      ctx.waitUntil(
+        fetchCount(env).then((response) => (response.ok ? cache.put(key, response.clone()) : undefined)),
+      );
+    }
+    return cached;
+  }
+
+  const response = await fetchCount(env);
+  if (response.ok) {
+    ctx.waitUntil(cache.put(key, response.clone()));
+  }
+  return response;
+}
+
 // --- Durable list fallback --------------------------------------------------
 //
 // The Cache API above is per-colo and can be empty for a route even on a
@@ -554,6 +610,12 @@ export default {
 
     if (ARTICLE_COMMENTS_PATH.test(pathname)) {
       return proxyCommentsGet(env, pathname);
+    }
+
+    // Checked before the generic /articles dispatch below -- ARTICLE_SLUG_PATH
+    // would otherwise match this path too and treat "count" as an article slug.
+    if (pathname === ARTICLES_COUNT_PATH) {
+      return proxyArticleCountRequest(env, ctx, cacheKeyFor(pathname, search, request.url));
     }
 
     // Routes mirror the API's exactly: /articles and /articles/{slug}. Only

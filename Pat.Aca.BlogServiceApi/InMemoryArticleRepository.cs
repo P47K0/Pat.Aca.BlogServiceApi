@@ -39,6 +39,9 @@ namespace Pat.Aca.BlogServiceApi
         public Task<Article?> GetArticleBySlugAsync(string slug) =>
             Task.FromResult(SeedArticles.FirstOrDefault(a => a.Slug == slug && a.PublishedAt <= DateTime.UtcNow));
 
+        public Task<int> GetArticleCountAsync() =>
+            Task.FromResult(SeedArticles.Count(a => a.PublishedAt <= DateTime.UtcNow));
+
         public Task<Article?> IncrementViewCountAsync(string slug)
         {
             var index = SeedArticles.FindIndex(a => a.Slug == slug && a.PublishedAt <= DateTime.UtcNow);

@@ -52,4 +52,13 @@ export interface Env {
    * fail-closed convention on the .NET side, just enforced here instead
    * since this time the .NET API is the caller, not the callee. */
   CACHE_INVALIDATION_SECRET: string;
+  /** Shared secret required (as the X-Embeddings-Count-Key header) on GET
+   * /internal/embeddings-count. Internal-use-only endpoint: called by a
+   * Worker behind the site's homepage to show a "documents indexed" style
+   * counter, never by a browser directly. Set via `wrangler secret put
+   * EMBEDDINGS_COUNT_SECRET`, never in wrangler.toml. Same fail-closed
+   * convention on an empty/missing value as CACHE_INVALIDATION_SECRET above
+   * -- the count itself isn't sensitive, but "internal only" was the
+   * explicit design intent, not "public but unadvertised". */
+  EMBEDDINGS_COUNT_SECRET: string;
 }

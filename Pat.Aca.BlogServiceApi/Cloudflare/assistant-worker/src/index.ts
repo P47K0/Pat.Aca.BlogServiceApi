@@ -8,8 +8,10 @@ import { verifyTurnstile } from './lib/turnstile';
 import { detectFlagReason, logConversation } from './lib/conversation-log';
 import { withCors, handlePreflight } from './lib/cors';
 import { bumpContentVersion } from './lib/cache-invalidation';
+import { getEmbeddingsCount } from './lib/embeddings-count';
 
 const CACHE_INVALIDATION_KEY_HEADER = 'X-Cache-Invalidation-Key';
+const EMBEDDINGS_COUNT_KEY_HEADER = 'X-Embeddings-Count-Key';
 
 interface AskRequestBody {
   question?: unknown;
@@ -110,6 +112,24 @@ async function handleInvalidateCache(request: Request, env: Env): Promise<Respon
   return new Response('ok');
 }
 
+/** GET /internal/embeddings-count — a total KnowledgeBase document count for
+ * a homepage counter on the site, e.g. "N facts and articles indexed".
+ * Internal-use-only by design: called by a Worker behind the site's
+ * homepage, never by a browser directly, so no CORS is set up for this
+ * route. Gated by its own shared secret regardless, since a plain count
+ * isn't sensitive but "internal only" was the explicit intent, not "public
+ * but unadvertised" -- same fail-closed-if-unconfigured convention as
+ * /internal/invalidate-cache. */
+async function handleEmbeddingsCount(request: Request, env: Env): Promise<Response> {
+  const providedKey = request.headers.get(EMBEDDINGS_COUNT_KEY_HEADER);
+  if (!env.EMBEDDINGS_COUNT_SECRET || providedKey !== env.EMBEDDINGS_COUNT_SECRET) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  const count = await getEmbeddingsCount(env);
+  return Response.json({ count });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -139,6 +159,10 @@ export default {
 
     if (url.pathname === '/internal/invalidate-cache' && request.method === 'POST') {
       return handleInvalidateCache(request, env);
+    }
+
+    if (url.pathname === '/internal/embeddings-count' && request.method === 'GET') {
+      return handleEmbeddingsCount(request, env);
     }
 
     return new Response('Not found', { status: 404 });

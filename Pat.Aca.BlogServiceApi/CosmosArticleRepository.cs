@@ -150,6 +150,26 @@ namespace Pat.Aca.BlogServiceApi
             return articles;
         }
 
+        public async Task<int> GetArticleCountAsync()
+        {
+            // Same future-publishedAt exclusion as GetArticlesAsync, but a
+            // plain scalar count instead of fetching every article's full
+            // document just to read a length.
+            var query = new QueryDefinition(
+                "SELECT VALUE COUNT(1) FROM c WHERE c.publishedAt <= @now")
+                .WithParameter("@now", DateTime.UtcNow);
+
+            using FeedIterator<int> iterator = _container.GetItemQueryIterator<int>(query);
+            var count = 0;
+            while (iterator.HasMoreResults)
+            {
+                FeedResponse<int> response = await iterator.ReadNextAsync();
+                count += response.Resource.FirstOrDefault();
+            }
+
+            return count;
+        }
+
         public async Task<ArticlesPage> GetArticlesPageAsync(int limit, string? afterSlug)
         {
             // Cursor is the previous page's last article's slug. Resolve it

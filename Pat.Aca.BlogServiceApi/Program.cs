@@ -314,6 +314,19 @@ app.MapGet("/articles", async (int? limit, string? after, IArticleRepository art
     .RequireRateLimiting(ArticlesRateLimiterPolicy)
     .AddEndpointFilter(RequireApiKey);
 
+// Count-only, for callers that just need a total (e.g. the site's homepage
+// blog-post counter) without paying for every article's full payload
+// (markdown content, tags, etc.) just to read an array length. Same
+// auth/rate-limit treatment as the other read endpoints -- api-proxy stays
+// the one public, key-free path in, same as always.
+app.MapGet("/articles/count", async (IArticleRepository articleRepository) =>
+{
+    var count = await articleRepository.GetArticleCountAsync();
+    return Results.Json(new { count });
+})
+    .RequireRateLimiting(ArticlesRateLimiterPolicy)
+    .AddEndpointFilter(RequireApiKey);
+
 app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleRepository articleRepository, ILogger<Program> logger) =>
 {
     if (string.IsNullOrEmpty(slug))

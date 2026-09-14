@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pat.Aca.BlogServiceApi;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Xunit;
 
 namespace Pat.ACA.BlogServiceTests
@@ -196,6 +197,27 @@ namespace Pat.ACA.BlogServiceTests
         public async Task GET_articles_returns_401_problem_details_without_api_key()
         {
             using var response = await _clientWithoutApiKey.GetAsync("/articles");
+
+            await AssertProblemDetailsAsync(response, 401);
+        }
+
+        [Fact]
+        public async Task GET_articles_count_matches_the_published_article_count()
+        {
+            var articlesResponse = await _client.GetAsync("/articles");
+            var articles = await articlesResponse.Content.ReadFromJsonAsync<List<Article>>();
+
+            var countResponse = await _client.GetAsync("/articles/count");
+            countResponse.EnsureSuccessStatusCode();
+            var body = await countResponse.Content.ReadFromJsonAsync<JsonElement>();
+
+            Assert.Equal(articles!.Count, body.GetProperty("count").GetInt32());
+        }
+
+        [Fact]
+        public async Task GET_articles_count_returns_401_problem_details_without_api_key()
+        {
+            using var response = await _clientWithoutApiKey.GetAsync("/articles/count");
 
             await AssertProblemDetailsAsync(response, 401);
         }

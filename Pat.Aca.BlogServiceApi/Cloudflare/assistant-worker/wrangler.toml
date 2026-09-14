@@ -54,6 +54,11 @@ ALLOWED_ORIGIN = "https://www.koorevaar.com"
 # after a successful article create/update. Same off-wrangler.toml Secret
 # treatment as everything else in this section, for the same reason.
 
+# EMBEDDINGS_COUNT_SECRET: checked on GET /internal/embeddings-count,
+# called by a Worker behind the site's homepage counter, never the chat
+# widget or a browser directly. Same off-wrangler.toml Secret treatment as
+# everything else in this section.
+
 # TURNSTILE_SECRET_KEY (Phase 6): verified on every POST /ask. Set via the
 # dashboard's Variables and Secrets or `wrangler secret put
 # TURNSTILE_SECRET_KEY`, never here -- same off-wrangler.toml treatment as
