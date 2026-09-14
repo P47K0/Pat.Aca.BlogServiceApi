@@ -160,3 +160,42 @@ export async function retrieveChunks(
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
 }
+
+/** Counts documents in one partition — same one-partition-at-a-time
+ * constraint as queryPartition above, a plain `SELECT VALUE COUNT(1)`
+ * can't run cross-partition via the REST API either. */
+async function countPartition(env: Env, sourceType: SourceType): Promise<number> {
+  const token = await getAccessToken(env);
+  const url = `https://${env.COSMOS_ACCOUNT_NAME}.documents.azure.com/dbs/${DATABASE_NAME}/colls/${CONTAINER_NAME}/docs`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: encodeURIComponent(`type=aad&ver=1.0&sig=${token}`),
+      'x-ms-date': new Date().toUTCString(),
+      'x-ms-version': API_VERSION,
+      'x-ms-documentdb-isquery': 'true',
+      'x-ms-documentdb-partitionkey': JSON.stringify([sourceType]),
+      'Content-Type': 'application/query+json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ query: 'SELECT VALUE COUNT(1) FROM c' }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Cosmos count failed for sourceType=${sourceType}: ${response.status} ${await response.text()}`);
+  }
+
+  const body = (await response.json()) as { Documents: number[] };
+  return body.Documents[0] ?? 0;
+}
+
+/** Total document count across both KnowledgeBase partitions — one number
+ * per embedding stored, since every document holds exactly one. Backs the
+ * site homepage's embeddings counter (see embeddings-count.ts for the KV
+ * cache in front of this — a homepage view shouldn't cost a live Cosmos
+ * round trip every time). */
+export async function countAllChunks(env: Env): Promise<number> {
+  const counts = await Promise.all(SOURCE_TYPES.map((sourceType) => countPartition(env, sourceType)));
+  return counts.reduce((total, count) => total + count, 0);
+}

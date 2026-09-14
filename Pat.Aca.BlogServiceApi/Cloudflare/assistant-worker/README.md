@@ -49,6 +49,11 @@ project's own conventions:
     next lookup (`src/lib/semantic-cache.ts`) and dropped from storage —
     coarse, whole-cache invalidation by design, not a per-article reverse
     index.
+11. `GET /internal/embeddings-count` (`src/lib/embeddings-count.ts`),
+    guarded by its own shared secret, for a "documents indexed" style
+    counter on the site's homepage. Internal-use-only by design — called by
+    a Worker, not a browser — and KV-cached for an hour so a public,
+    high-traffic page doesn't cost a live Cosmos round trip on every view.
 
 ## Setup
 
