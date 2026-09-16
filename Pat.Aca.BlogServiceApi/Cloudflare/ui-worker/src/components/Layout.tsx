@@ -136,15 +136,6 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
             {/* Plain GET form, no client-side JS — submits straight to the
                 server-rendered /search results page (see SearchPage.tsx). */}
             <form method="get" action="/search" class="flex h-10 min-w-0 flex-1 items-center">
-                server-rendered /search results page (see SearchPage.tsx).
-                The form itself is a flex container (not just its input) so
-                its box height matches its siblings exactly under the outer
-                row's items-center — a plain block-level <form> wrapping a
-                native <input type="search"> otherwise renders slightly
-                taller in some browsers (native search-input chrome), which
-                threw off vertical centering against the "Blog" link and
-                Home button on either side. appearance-none on the input
-                strips that native styling for the same reason. */}
               <input
                 type="search"
                 name="q"
