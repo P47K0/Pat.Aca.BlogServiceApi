@@ -7,14 +7,24 @@ import { ArticleCard } from '../components/ArticleCard';
  * no-client-JS-except-infinite-scroll minimalism. The query box works for
  * either a few keywords or a full question: this is semantic (embedding)
  * search against assistant-worker's KnowledgeBase, not literal keyword
- * matching. */
+ * matching -- the "Semantic Search" badge + subtitle below call that out
+ * explicitly (portfolio value: this is worth surfacing, not just an
+ * implementation detail buried in code comments). */
 export const SearchPage: FC<{ query: string; articles: Article[]; errorMessage?: string }> = ({
   query,
   articles,
   errorMessage,
 }) => (
   <>
-    <h1 class="mb-6 text-2xl font-semibold">Search</h1>
+    <div class="mb-2 flex items-center gap-3">
+      <h1 class="text-2xl font-semibold">Search</h1>
+      <span class="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700">
+        Semantic Search
+      </span>
+    </div>
+    <p class="mb-6 text-sm text-gray-500">
+      Powered by AI embeddings — search by keyword or ask a full question, both work.
+    </p>
     <form method="get" action="/search" class="mb-8 flex gap-2">
       <input
         type="search"
