@@ -116,10 +116,26 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
       <body class="min-h-screen flex flex-col bg-gray-100 text-gray-900">
         <header class="border-b border-gray-200 px-6 py-4">
           <div class="mx-auto flex max-w-2xl items-center justify-between gap-4">
-            <a href="/" class="shrink-0 text-xl font-semibold transition hover:text-blue-600">
+            {/* All three items below share an explicit h-10, rather than
+                relying on items-center to line up their differing intrinsic
+                content heights (font size, padding, a native form control's
+                own box model) -- that approach visibly failed in production
+                (confirmed live, not just a stale-deploy guess): a plain
+                <input type="search"> still rendered shorter/higher than
+                these siblings even with appearance-none and a flex wrapper
+                around it. Forcing every item to the same fixed height
+                sidesteps that entirely -- each one centers its own content
+                (text or icon+text) within an identical 40px box, so there's
+                nothing left to be inconsistent across browsers. */}
+            <a
+              href="/"
+              class="inline-flex h-10 shrink-0 items-center text-xl font-semibold transition hover:text-blue-600"
+            >
               Blog
             </a>
             {/* Plain GET form, no client-side JS — submits straight to the
+                server-rendered /search results page (see SearchPage.tsx). */}
+            <form method="get" action="/search" class="flex h-10 min-w-0 flex-1 items-center">
                 server-rendered /search results page (see SearchPage.tsx).
                 The form itself is a flex container (not just its input) so
                 its box height matches its siblings exactly under the outer
@@ -129,21 +145,20 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
                 threw off vertical centering against the "Blog" link and
                 Home button on either side. appearance-none on the input
                 strips that native styling for the same reason. */}
-            <form method="get" action="/search" class="flex min-w-0 flex-1 items-center">
               <input
                 type="search"
                 name="q"
                 value={searchQuery}
                 placeholder="Search…"
                 aria-label="Search articles"
-                class="w-full appearance-none rounded-xl border border-gray-300 px-3 py-1.5 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
+                class="h-full w-full appearance-none rounded-xl border border-gray-300 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
               />
             </form>
             {/* Same button/copy/icon as the koorevaar.com contact page's Home
                 link, back to the main site (not this blog's own "/"). */}
             <a
               href="https://www.koorevaar.com"
-              class="flex shrink-0 items-center gap-2 rounded-2xl border border-gray-300 bg-white px-5 py-2.5 font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 hover:text-blue-600"
+              class="flex h-10 shrink-0 items-center gap-2 rounded-2xl border border-gray-300 bg-white px-5 font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 hover:text-blue-600"
             >
               {/*<!--Font Awesome Free v7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.-->*/}
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M224 24c0-13.3 10.7-24 24-24 145.8 0 264 118.2 264 264 0 13.3-10.7 24-24 24s-24-10.7-24-24c0-119.3-96.7-216-216-216-13.3 0-24-10.7-24-24zM80 96c26.5 0 48 21.5 48 48l0 224c0 26.5 21.5 48 48 48s48-21.5 48-48-21.5-48-48-48c-8.8 0-16-7.2-16-16l0-64c0-8.8 7.2-16 16-16 79.5 0 144 64.5 144 144S255.5 512 176 512 32 447.5 32 368l0-224c0-26.5 21.5-48 48-48zm168 0c92.8 0 168 75.2 168 168 0 13.3-10.7 24-24 24s-24-10.7-24-24c0-66.3-53.7-120-120-120-13.3 0-24-10.7-24-24s10.7-24 24-24z" /></svg>
