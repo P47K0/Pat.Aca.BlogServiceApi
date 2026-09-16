@@ -116,20 +116,22 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
       <body class="min-h-screen flex flex-col bg-gray-100 text-gray-900">
         <header class="border-b border-gray-200 px-6 py-4">
           <div class="mx-auto flex max-w-2xl items-center justify-between gap-4">
-            {/* All three items below share an explicit h-10 so they line up
-                regardless of each one's own content (font size, padding,
-                icon+text). The search box previously used
-                <input type="search">, which turned out to be the real
-                culprit behind two rounds of this still not lining up in
-                production, confirmed live both times (not a stale-deploy
-                guess) -- type="search" carries its own internal
-                shadow-DOM decorations in some browsers that resist
-                appearance-none/height overrides entirely, growing well past
-                the h-10/h-full it was given. Switched to a plain
-                type="text" instead, which has no such native chrome and so
-                nothing left to override -- enterkeyhint="search" keeps the
-                mobile virtual keyboard's return-key hint without any of
-                type="search"'s rendering quirks. */}
+            {/* All three items below use an explicit, absolute h-10 (2.5rem)
+                directly on the element that actually renders a box, so they
+                line up regardless of each one's own content (font size,
+                icon+text). Two earlier attempts at this both looked correct
+                on paper but were confirmed broken live, in different ways in
+                different browsers (Safari/Edge/Chrome) -- first
+                type="search" (its native shadow-DOM chrome resisted
+                appearance-none/height overrides entirely), then h-full
+                (a PERCENTAGE height) on the input inside a flex parent using
+                items-center rather than stretch -- percentage-height
+                resolution in that exact combination is a known
+                cross-browser trouble spot, which fits varying by browser
+                the way this did. Both are gone now: type="text" (no native
+                chrome to fight), and h-10 given directly to the input
+                itself as a plain absolute length -- no percentage
+                resolution involved anywhere, nothing left to disagree on. */}
             <a
               href="/"
               class="inline-flex h-10 shrink-0 items-center text-xl font-semibold transition hover:text-blue-600"
@@ -137,8 +139,12 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
               Blog
             </a>
             {/* Plain GET form, no client-side JS — submits straight to the
-                server-rendered /search results page (see SearchPage.tsx). */}
-            <form method="get" action="/search" class="flex h-10 min-w-0 flex-1 items-center">
+                server-rendered /search results page (see SearchPage.tsx).
+                No height/flex classes needed on the form itself -- it's a
+                block-level element with one block-level child (the input),
+                so its own rendered box just matches that child's h-10 box
+                directly, no cross-axis alignment involved at all. */}
+            <form method="get" action="/search" class="min-w-0 flex-1">
               <input
                 type="text"
                 enterkeyhint="search"
@@ -146,7 +152,7 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
                 value={searchQuery}
                 placeholder="Search…"
                 aria-label="Search articles"
-                class="h-full w-full rounded-xl border border-gray-300 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
+                class="h-10 w-full rounded-xl border border-gray-300 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
               />
             </form>
             {/* Same button/copy/icon as the koorevaar.com contact page's Home
