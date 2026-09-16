@@ -26,14 +26,16 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     ///   Queued.
     /// - The model DID run, but its response text doesn't parse into the
     ///   {"score": 0-5, "reason": "..."} shape the prompt asks for (bad
-    ///   JSON, missing fields, an out-of-range score) -- ParseModelResponseText
-    ///   fails safe to ModerationScore(0, ...) instead of throwing. A
-    ///   formatting quirk in the model's output isn't an infra problem
-    ///   retrying would fix, and defaulting to the lowest score (rather
-    ///   than silently dropping the comment, or worse, guessing it's fine)
-    ///   guarantees an ambiguous case always still gets a human's eyes on
-    ///   it via the notification email CommentModerationProcessor always
-    ///   sends regardless of score.
+    ///   JSON, missing fields, an out-of-range score, or -- after fixes for
+    ///   two real production incidents -- a quoted score or a stray extra
+    ///   character before/after the object, both tolerated now rather than
+    ///   failing) -- ParseModelResponseText fails safe to ModerationScore(0,
+    ///   ...) instead of throwing. A formatting quirk in the model's output
+    ///   isn't an infra problem retrying would fix, and defaulting to the
+    ///   lowest score (rather than silently dropping the comment, or worse,
+    ///   guessing it's fine) guarantees an ambiguous case always still gets
+    ///   a human's eyes on it via the notification email
+    ///   CommentModerationProcessor always sends regardless of score.
     /// </summary>
     public sealed class CloudflareWorkersAiScorer : IModerationScorer
     {
@@ -167,7 +169,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         /// </summary>
         public static ModerationScore ParseModelResponseText(string rawText)
         {
-            var candidate = StripMarkdownCodeFence(rawText);
+            var candidate = ExtractBalancedJsonObject(StripMarkdownCodeFence(rawText));
 
             try
             {
@@ -208,6 +210,75 @@ namespace Pat.Aca.BlogCommentsModerationFunction
             var withoutOpeningFence = trimmed[(firstNewline + 1)..];
             var closingFenceIndex = withoutOpeningFence.LastIndexOf("```", StringComparison.Ordinal);
             return (closingFenceIndex >= 0 ? withoutOpeningFence[..closingFenceIndex] : withoutOpeningFence).Trim();
+        }
+
+        // Confirmed in production 2026-09-16: this tiny model sometimes
+        // appends a stray extra closing brace after an otherwise
+        // well-formed {"score": ..., "reason": "..."} object (e.g.
+        // {"score": "4", "reason": "..."}} -- one } too many). Deserializing
+        // straight from JsonSerializer rejects that as trailing data even
+        // though the object itself parses fine, which used to silently
+        // downgrade a real score to the fail-safe 0 purely because of the
+        // extra character -- same failure shape as the truncated-response
+        // incident this file's max_tokens comment describes, just an extra
+        // character instead of a missing one. Scans from the first '{' and
+        // tracks brace depth (skipping over string-literal contents, so a
+        // reason that happens to mention "{" or "}" doesn't miscount) until
+        // depth returns to zero, then discards everything after that point.
+        // An object that never balances (e.g. genuinely truncated mid-
+        // response) is returned from the first brace onward unchanged --
+        // JsonSerializer.Deserialize still throws on that, same fail-safe
+        // path as before this helper existed.
+        private static string ExtractBalancedJsonObject(string text)
+        {
+            var start = text.IndexOf('{');
+            if (start < 0)
+            {
+                return text;
+            }
+
+            var depth = 0;
+            var inString = false;
+            var escaped = false;
+            for (var i = start; i < text.Length; i++)
+            {
+                var c = text[i];
+                if (inString)
+                {
+                    if (escaped)
+                    {
+                        escaped = false;
+                    }
+                    else if (c == '\\')
+                    {
+                        escaped = true;
+                    }
+                    else if (c == '"')
+                    {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                switch (c)
+                {
+                    case '"':
+                        inString = true;
+                        break;
+                    case '{':
+                        depth++;
+                        break;
+                    case '}':
+                        depth--;
+                        if (depth == 0)
+                        {
+                            return text[start..(i + 1)];
+                        }
+                        break;
+                }
+            }
+
+            return text[start..];
         }
 
         private static string Truncate(string text, int maxLength) =>
