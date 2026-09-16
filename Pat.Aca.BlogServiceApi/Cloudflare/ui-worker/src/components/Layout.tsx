@@ -116,17 +116,20 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
       <body class="min-h-screen flex flex-col bg-gray-100 text-gray-900">
         <header class="border-b border-gray-200 px-6 py-4">
           <div class="mx-auto flex max-w-2xl items-center justify-between gap-4">
-            {/* All three items below share an explicit h-10, rather than
-                relying on items-center to line up their differing intrinsic
-                content heights (font size, padding, a native form control's
-                own box model) -- that approach visibly failed in production
-                (confirmed live, not just a stale-deploy guess): a plain
-                <input type="search"> still rendered shorter/higher than
-                these siblings even with appearance-none and a flex wrapper
-                around it. Forcing every item to the same fixed height
-                sidesteps that entirely -- each one centers its own content
-                (text or icon+text) within an identical 40px box, so there's
-                nothing left to be inconsistent across browsers. */}
+            {/* All three items below share an explicit h-10 so they line up
+                regardless of each one's own content (font size, padding,
+                icon+text). The search box previously used
+                <input type="search">, which turned out to be the real
+                culprit behind two rounds of this still not lining up in
+                production, confirmed live both times (not a stale-deploy
+                guess) -- type="search" carries its own internal
+                shadow-DOM decorations in some browsers that resist
+                appearance-none/height overrides entirely, growing well past
+                the h-10/h-full it was given. Switched to a plain
+                type="text" instead, which has no such native chrome and so
+                nothing left to override -- enterkeyhint="search" keeps the
+                mobile virtual keyboard's return-key hint without any of
+                type="search"'s rendering quirks. */}
             <a
               href="/"
               class="inline-flex h-10 shrink-0 items-center text-xl font-semibold transition hover:text-blue-600"
@@ -137,12 +140,13 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
                 server-rendered /search results page (see SearchPage.tsx). */}
             <form method="get" action="/search" class="flex h-10 min-w-0 flex-1 items-center">
               <input
-                type="search"
+                type="text"
+                enterkeyhint="search"
                 name="q"
                 value={searchQuery}
                 placeholder="Search…"
                 aria-label="Search articles"
-                class="h-full w-full appearance-none rounded-xl border border-gray-300 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
+                class="h-full w-full rounded-xl border border-gray-300 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
               />
             </form>
             {/* Same button/copy/icon as the koorevaar.com contact page's Home
