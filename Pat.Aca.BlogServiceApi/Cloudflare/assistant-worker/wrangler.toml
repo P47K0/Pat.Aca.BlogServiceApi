@@ -59,6 +59,13 @@ ALLOWED_ORIGIN = "https://www.koorevaar.com"
 # widget or a browser directly. Same off-wrangler.toml Secret treatment as
 # everything else in this section.
 
+# SEARCH_SECRET: checked on GET /search, called by ui-worker's own SSR route
+# handler for the blog search box (server-to-server, never a browser
+# directly). Same off-wrangler.toml Secret treatment as everything else in
+# this section -- deliberately set to the identical value/name as ui-worker's
+# own SEARCH_SECRET, mirroring how ARTICLES_API_KEY is the same value/name on
+# both api-proxy and blog-service-api.
+
 # TURNSTILE_SECRET_KEY (Phase 6): verified on every POST /ask. Set via the
 # dashboard's Variables and Secrets or `wrangler secret put
 # TURNSTILE_SECRET_KEY`, never here -- same off-wrangler.toml treatment as

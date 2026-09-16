@@ -2,8 +2,9 @@ import type { Env } from './env';
 import { embedText } from './lib/embeddings';
 import { findCachedMatch, addCacheEntry } from './lib/semantic-cache';
 import { retrieveChunks, type KnowledgeBaseChunk } from './lib/cosmos-client';
+import { searchArticles } from './lib/article-search';
 import { generateAnswer } from './lib/generation';
-import { checkRateLimit } from './lib/rate-limit';
+import { checkRateLimit, type RateLimitConfig } from './lib/rate-limit';
 import { verifyTurnstile } from './lib/turnstile';
 import { detectFlagReason, logConversation } from './lib/conversation-log';
 import { withCors, handlePreflight } from './lib/cors';
@@ -12,6 +13,22 @@ import { getEmbeddingsCount } from './lib/embeddings-count';
 
 const CACHE_INVALIDATION_KEY_HEADER = 'X-Cache-Invalidation-Key';
 const EMBEDDINGS_COUNT_KEY_HEADER = 'X-Embeddings-Count-Key';
+const SEARCH_KEY_HEADER = 'X-Search-Key';
+// Set by ui-worker on its server-to-server call -- the real visitor IP, not
+// this Worker's own CF-Connecting-IP (which here would just be ui-worker's
+// egress). Same forwarding convention ui-worker itself already uses calling
+// blog-service-api for comment submission (X-Real-Client-Ip).
+const REAL_CLIENT_IP_HEADER = 'X-Real-Client-Ip';
+
+// Independent budget from /ask's own rate limit (see rate-limit.ts) -- a
+// distinct keyPrefix means a visitor's search activity never eats into their
+// /ask allowance or vice versa. No Turnstile step here (server-to-server, not
+// a public form submission), so a slightly higher limit than /ask's 20/10min
+// is reasonable -- unTuned starting guess, same as every other constant in
+// this file's neighborhood.
+const SEARCH_RATE_LIMIT: RateLimitConfig = { keyPrefix: 'search-ratelimit', windowSeconds: 600, limitPerWindow: 30 };
+const SEARCH_RESULT_LIMIT_DEFAULT = 10;
+const SEARCH_RESULT_LIMIT_MAX = 20;
 
 interface AskRequestBody {
   question?: unknown;
@@ -130,6 +147,48 @@ async function handleEmbeddingsCount(request: Request, env: Env): Promise<Respon
   return Response.json({ count });
 }
 
+/** GET /search — blog search, reusing the KnowledgeBase embeddings already
+ * built for the chat assistant. No LLM generation involved at all, unlike
+ * /ask: this is retrieval + ranking only, embedding the query then returning
+ * the best-matching articles by sourceSlug (see article-search.ts for the
+ * dedup-per-article logic). Server-to-server only (ui-worker's own SSR route
+ * handler calls this, never a visitor's browser directly) -- guarded by a
+ * shared secret rather than CORS/Turnstile, same convention as
+ * /internal/embeddings-count. ui-worker resolves the returned slugs to real
+ * article title/summary/date itself (from the article list it already
+ * fetches elsewhere) -- KnowledgeBase chunks carry no title, only
+ * sourceSlug. */
+async function handleSearch(request: Request, env: Env): Promise<Response> {
+  const providedKey = request.headers.get(SEARCH_KEY_HEADER);
+  // An unconfigured secret must fail closed, not be read as "auth disabled"
+  // -- same convention as every other shared-secret route in this file.
+  if (!env.SEARCH_SECRET || providedKey !== env.SEARCH_SECRET) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  const clientIp = request.headers.get(REAL_CLIENT_IP_HEADER) ?? 'unknown';
+  const withinLimit = await checkRateLimit(env.ASSISTANT_CACHE, clientIp, SEARCH_RATE_LIMIT);
+  if (!withinLimit) {
+    return Response.json({ error: 'Too many requests, please try again later.' }, { status: 429 });
+  }
+
+  const url = new URL(request.url);
+  const query = url.searchParams.get('q')?.trim() ?? '';
+  if (query === '') {
+    return Response.json({ error: 'q is required' }, { status: 400 });
+  }
+
+  const requestedLimit = Number(url.searchParams.get('limit'));
+  const limit =
+    Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, SEARCH_RESULT_LIMIT_MAX)
+      : SEARCH_RESULT_LIMIT_DEFAULT;
+
+  const queryEmbedding = await embedText(env.AI, query);
+  const results = await searchArticles(env, queryEmbedding, limit);
+  return Response.json({ results });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -163,6 +222,10 @@ export default {
 
     if (url.pathname === '/internal/embeddings-count' && request.method === 'GET') {
       return handleEmbeddingsCount(request, env);
+    }
+
+    if (url.pathname === '/search' && request.method === 'GET') {
+      return handleSearch(request, env);
     }
 
     return new Response('Not found', { status: 404 });
