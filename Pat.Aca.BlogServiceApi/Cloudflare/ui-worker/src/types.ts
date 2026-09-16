@@ -14,6 +14,20 @@ export interface Env {
    * Cloudflare's siteverify endpoint. Set via `wrangler secret put
    * TURNSTILE_SECRET_KEY` — never checked into wrangler.toml. */
   TURNSTILE_SECRET_KEY: string;
+  /** Base URL of the assistant-worker Worker (ai-assistant.koorevaar.com) —
+   * reused here for blog search (GET /search), since KnowledgeBase's article
+   * embeddings already live there for the chat assistant. Plain `[vars]`
+   * entry, not a secret, same idea as API_PROXY_BASE_URL above. */
+  ASSISTANT_WORKER_BASE_URL: string;
+  /** Shared secret sent as X-Search-Key when calling assistant-worker's
+   * GET /search — server-to-server only (this Worker's own SSR route
+   * handler calls it, never the visitor's browser directly), matching that
+   * Worker's fail-closed-if-unconfigured convention for its other internal
+   * routes. Set via `wrangler secret put SEARCH_SECRET`, never committed to
+   * wrangler.toml — deliberately the same name/value as assistant-worker's
+   * own SEARCH_SECRET, mirroring how ARTICLES_API_KEY is the identical
+   * value/name on both api-proxy and blog-service-api. */
+  SEARCH_SECRET: string;
 }
 
 /** Shape returned by api-proxy's GET /articles/{slug}/comments — mirrors

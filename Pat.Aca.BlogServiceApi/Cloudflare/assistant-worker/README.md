@@ -54,6 +54,14 @@ project's own conventions:
     counter on the site's homepage. Internal-use-only by design — called by
     a Worker, not a browser — and KV-cached for an hour so a public,
     high-traffic page doesn't cost a live Cosmos round trip on every view.
+12. `GET /search` (`src/lib/article-search.ts`), reusing the same
+    KnowledgeBase embeddings for blog search — retrieval + ranking only, no
+    LLM generation. Scoped to `sourceType: "article"` chunks (a profile fact
+    has no article page to link to), deduped down to one result per
+    `sourceSlug` since an article's summary+paragraph chunks commonly
+    co-occur in the same query's results. Server-to-server only, guarded by
+    its own shared secret — called by `ui-worker`'s search page, never a
+    visitor's browser directly.
 
 ## Setup
 
@@ -83,6 +91,10 @@ pick any random value and configure the identical value as ACA's
 `AssistantWorker:InvalidateCacheKey` (see the main API project's own
 `appsettings.json`/environment config), since this is a shared secret both
 sides must agree on, not one ACA reads back from here.
+
+`SEARCH_SECRET` is the same shared-secret pattern again — pick any random
+value and configure the identical value as `ui-worker`'s own `SEARCH_SECRET`
+(`wrangler secret put SEARCH_SECRET` on both Workers).
 
 ## Deploy
 

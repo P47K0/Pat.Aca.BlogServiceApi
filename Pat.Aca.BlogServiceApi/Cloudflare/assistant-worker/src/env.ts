@@ -61,4 +61,14 @@ export interface Env {
    * -- the count itself isn't sensitive, but "internal only" was the
    * explicit design intent, not "public but unadvertised". */
   EMBEDDINGS_COUNT_SECRET: string;
+  /** Shared secret required (as the X-Search-Key header) on GET /search.
+   * Server-to-server only: called by ui-worker's own SSR route handler for
+   * the blog search box, never a browser directly -- so no CORS is set up
+   * for this route either, same reasoning as /internal/embeddings-count.
+   * Set via `wrangler secret put SEARCH_SECRET`, never in wrangler.toml.
+   * Same fail-closed-if-unconfigured convention as the other shared secrets
+   * above. Deliberately the same name/value on both Workers (ui-worker holds
+   * its own SEARCH_SECRET), mirroring how ARTICLES_API_KEY is the identical
+   * value/name on both api-proxy and blog-service-api. */
+  SEARCH_SECRET: string;
 }

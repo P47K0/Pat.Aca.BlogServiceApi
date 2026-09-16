@@ -161,6 +161,26 @@ export async function retrieveChunks(
     .slice(0, topK);
 }
 
+/** Queries just the "article" partition, for GET /search -- unlike
+ * retrieveChunks (used by /ask), search deliberately never surfaces
+ * `sourceType: "profile"` facts, since there's no article page to link a
+ * profile fact to. `candidatePoolSize` is typically larger than the final
+ * result count the caller wants: an article is chunked into one summary +
+ * one-per-paragraph embedding (see the Phase 2 chunking design), so a single
+ * query commonly returns several chunks from the same article -- see
+ * article-search.ts's searchArticles for the dedup-to-one-result-per-article
+ * step built on top of this. Cosmos's own bare `ORDER BY VectorDistance(...)`
+ * already returns these nearest-first (see queryPartition's doc comment), so
+ * no client-side re-sort is needed here the way retrieveChunks needs one to
+ * merge multiple partitions. */
+export async function retrieveArticleChunkCandidates(
+  env: Env,
+  embedding: number[],
+  candidatePoolSize: number,
+): Promise<KnowledgeBaseChunk[]> {
+  return queryPartition(env, 'article', embedding, candidatePoolSize);
+}
+
 /** Counts documents in one partition — same one-partition-at-a-time
  * constraint as queryPartition above, a plain `SELECT VALUE COUNT(1)`
  * can't run cross-partition via the REST API either. */
