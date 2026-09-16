@@ -130,9 +130,14 @@ namespace Pat.Aca.BlogServiceApi
         public async Task<List<Article>> GetArticlesAsync()
         {
             // BRD: newest-first, and a future publishedAt means "scheduled" —
-            // excluded from public results until that time passes.
+            // excluded from public results until that time passes. The
+            // unlisted check tolerates a missing field (NOT IS_DEFINED) so
+            // every article written before this field existed still counts
+            // as listed, matching the C# default of false.
             var query = new QueryDefinition(
-                "SELECT * FROM c WHERE c.publishedAt <= @now ORDER BY c.publishedAt DESC")
+                "SELECT * FROM c WHERE c.publishedAt <= @now " +
+                "AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false) " +
+                "ORDER BY c.publishedAt DESC")
                 .WithParameter("@now", DateTime.UtcNow);
 
             // See the comment in GetArticleBySlugAsync above — deserializing
@@ -152,11 +157,12 @@ namespace Pat.Aca.BlogServiceApi
 
         public async Task<int> GetArticleCountAsync()
         {
-            // Same future-publishedAt exclusion as GetArticlesAsync, but a
-            // plain scalar count instead of fetching every article's full
-            // document just to read a length.
+            // Same future-publishedAt and unlisted exclusions as
+            // GetArticlesAsync, but a plain scalar count instead of fetching
+            // every article's full document just to read a length.
             var query = new QueryDefinition(
-                "SELECT VALUE COUNT(1) FROM c WHERE c.publishedAt <= @now")
+                "SELECT VALUE COUNT(1) FROM c WHERE c.publishedAt <= @now " +
+                "AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false)")
                 .WithParameter("@now", DateTime.UtcNow);
 
             using FeedIterator<int> iterator = _container.GetItemQueryIterator<int>(query);
@@ -183,7 +189,8 @@ namespace Pat.Aca.BlogServiceApi
             if (!string.IsNullOrEmpty(afterSlug))
             {
                 var cursorQuery = new QueryDefinition(
-                    "SELECT VALUE c.publishedAt FROM c WHERE c.slug = @slug AND c.publishedAt <= @now")
+                    "SELECT VALUE c.publishedAt FROM c WHERE c.slug = @slug AND c.publishedAt <= @now " +
+                    "AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false)")
                     .WithParameter("@slug", afterSlug)
                     .WithParameter("@now", DateTime.UtcNow);
 
@@ -206,11 +213,14 @@ namespace Pat.Aca.BlogServiceApi
             // round trip.
             QueryDefinition query = cursorPublishedAt is null
                 ? new QueryDefinition(
-                    "SELECT TOP @take * FROM c WHERE c.publishedAt <= @now ORDER BY c.publishedAt DESC")
+                    "SELECT TOP @take * FROM c WHERE c.publishedAt <= @now " +
+                    "AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false) " +
+                    "ORDER BY c.publishedAt DESC")
                     .WithParameter("@take", limit + 1)
                     .WithParameter("@now", DateTime.UtcNow)
                 : new QueryDefinition(
                     "SELECT TOP @take * FROM c WHERE c.publishedAt <= @now " +
+                    "AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false) " +
                     "AND (c.publishedAt < @cursorPublishedAt OR (c.publishedAt = @cursorPublishedAt AND c.slug < @afterSlug)) " +
                     "ORDER BY c.publishedAt DESC")
                     .WithParameter("@take", limit + 1)
@@ -335,7 +345,8 @@ namespace Pat.Aca.BlogServiceApi
                 LinkedinVideoEmbedUrl = request.LinkedinVideoEmbedUrl,
                 SeriesName = request.SeriesName,
                 SeriesOrder = request.SeriesOrder,
-                RelatedSlugs = request.RelatedSlugs
+                RelatedSlugs = request.RelatedSlugs,
+                Unlisted = request.Unlisted
             };
 
             ItemResponse<ArticleDocument> response = await _container.CreateItemAsync(document, new PartitionKey(document.Slug));
@@ -367,7 +378,8 @@ namespace Pat.Aca.BlogServiceApi
                 PatchOperation.Set("/linkedinVideoEmbedUrl", request.LinkedinVideoEmbedUrl),
                 PatchOperation.Set("/seriesName", request.SeriesName),
                 PatchOperation.Set("/seriesOrder", request.SeriesOrder),
-                PatchOperation.Set("/relatedSlugs", request.RelatedSlugs)
+                PatchOperation.Set("/relatedSlugs", request.RelatedSlugs),
+                PatchOperation.Set("/unlisted", request.Unlisted)
             };
 
             ItemResponse<ArticleDocument> response = await _container.PatchItemAsync<ArticleDocument>(
@@ -383,7 +395,7 @@ namespace Pat.Aca.BlogServiceApi
             // Existing hand-authored articles keep their old (PascalCase-stored)
             // Id value untouched; it's simply never read or written by this
             // class's write methods.
-            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl, document.SeriesName, document.SeriesOrder, document.RelatedSlugs);
+            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl, document.SeriesName, document.SeriesOrder, document.RelatedSlugs, document.Unlisted);
 
         /// <summary>
         /// The exact JSON shape written to/read from Cosmos by every method in
@@ -446,6 +458,9 @@ namespace Pat.Aca.BlogServiceApi
 
             [JsonProperty("relatedSlugs")]
             public List<string>? RelatedSlugs { get; set; }
+
+            [JsonProperty("unlisted")]
+            public bool Unlisted { get; set; }
         }
 
         public async Task<List<ArticleSummary>> GetRecentArticlesAsync(int count = 5)

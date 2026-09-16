@@ -26,5 +26,13 @@ namespace Pat.Aca.BlogServiceApi
         // clean numbered sequence. Deliberately just slugs, no separate
         // cluster/group name field. Not validated for symmetry or that a
         // referenced slug actually exists.
-        List<string>? RelatedSlugs = null);
+        List<string>? RelatedSlugs = null,
+        // Excludes this article from GetArticlesAsync/GetArticlesPageAsync/
+        // GetArticleCountAsync (and therefore the homepage, sitemap.xml,
+        // feed.xml, and the tag cloud, all of which derive from those) while
+        // GetArticleBySlugAsync still returns it directly — for content that
+        // needs a real, fetchable slug but isn't a blog post (e.g. the /about
+        // CV-like document). Defaults false so every existing article stays
+        // listed exactly as before this field was added.
+        bool Unlisted = false);
 }

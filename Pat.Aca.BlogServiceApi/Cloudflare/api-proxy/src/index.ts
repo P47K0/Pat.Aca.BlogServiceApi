@@ -298,6 +298,77 @@ async function proxyArticleCountRequest(env: Env, ctx: ExecutionContext, key: Re
   return response;
 }
 
+// --- Article markdown --------------------------------------------------
+//
+// GET /articles/{slug}.md and GET /about.md serve the raw Markdown `content`
+// field 1:1 (no cleanup — decided when this feature was designed) instead of
+// the rendered HTML every other route returns, for AI crawlers/agents and a
+// human's own "view as Markdown" link. Deliberately NOT routed through
+// fetchAndRender (which unconditionally renders `content` via marked.parse())
+// -- this is the one place that skips that step on purpose. `/about.md` is
+// just this same mechanism pointed at the fixed slug "about" -- the CV/about
+// document is an ordinary Article (Unlisted so it never shows up in the
+// list/sitemap/feed/tag cloud), not a separate resource. Gets the same
+// simple SWR treatment as fetchCount/proxyArticleCountRequest above, not the
+// full durable-KV-fallback machinery the HTML detail route gets: this is a
+// secondary, lower-traffic surface (crawlers, not the primary reader path),
+// so a slow cold start here just means a slower crawl, not a broken page.
+const ARTICLE_MD_PATH = /^\/articles\/([^/]+)\.md$/;
+const ABOUT_MD_PATH = '/about.md';
+const ABOUT_SLUG = 'about';
+
+async function fetchArticleMarkdown(env: Env, slug: string): Promise<Response> {
+  const upstreamUrl = new URL(`/articles/${encodeURIComponent(slug)}`, env.API_BASE_URL);
+  const upstreamResponse = await fetch(upstreamUrl.toString(), {
+    method: 'GET',
+    headers: {
+      [API_KEY_HEADER]: env.ARTICLES_API_KEY,
+      Accept: 'application/json',
+    },
+  });
+
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+    headers.set(key, value);
+  }
+
+  if (!upstreamResponse.ok) {
+    // Passes through the API's own RFC 7807 problem+json body/status (404
+    // for an unknown/future-dated slug) rather than a bespoke error shape.
+    headers.set('Content-Type', upstreamResponse.headers.get('content-type') ?? 'application/problem+json');
+    return new Response(upstreamResponse.body, { status: upstreamResponse.status, headers });
+  }
+
+  const article = (await upstreamResponse.json()) as Article;
+  headers.set('Content-Type', 'text/markdown; charset=utf-8');
+  headers.set(CACHED_AT_HEADER, String(Date.now()));
+  return new Response(article.content, { status: 200, headers });
+}
+
+async function proxyArticleMarkdownRequest(
+  env: Env,
+  ctx: ExecutionContext,
+  slug: string,
+  key: Request,
+): Promise<Response> {
+  const cached = await cache.match(key);
+  if (cached) {
+    const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
+    if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
+      ctx.waitUntil(
+        fetchArticleMarkdown(env, slug).then((response) => (response.ok ? cache.put(key, response.clone()) : undefined)),
+      );
+    }
+    return cached;
+  }
+
+  const response = await fetchArticleMarkdown(env, slug);
+  if (response.ok) {
+    ctx.waitUntil(cache.put(key, response.clone()));
+  }
+  return response;
+}
+
 // --- Durable list fallback --------------------------------------------------
 //
 // The Cache API above is per-colo and can be empty for a route even on a
@@ -616,6 +687,16 @@ export default {
     // would otherwise match this path too and treat "count" as an article slug.
     if (pathname === ARTICLES_COUNT_PATH) {
       return proxyArticleCountRequest(env, ctx, cacheKeyFor(pathname, search, request.url));
+    }
+
+    // Also checked before the generic dispatch -- these serve raw Markdown,
+    // never the rendered-HTML shape fetchAndRender produces.
+    if (pathname === ABOUT_MD_PATH) {
+      return proxyArticleMarkdownRequest(env, ctx, ABOUT_SLUG, cacheKeyFor(pathname, search, request.url));
+    }
+    const mdMatch = pathname.match(ARTICLE_MD_PATH);
+    if (mdMatch) {
+      return proxyArticleMarkdownRequest(env, ctx, mdMatch[1], cacheKeyFor(pathname, search, request.url));
     }
 
     // Routes mirror the API's exactly: /articles and /articles/{slug}. Only

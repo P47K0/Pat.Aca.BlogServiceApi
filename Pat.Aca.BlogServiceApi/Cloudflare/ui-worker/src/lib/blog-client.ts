@@ -1,9 +1,9 @@
 import type { Article, Env, PublicComment } from '../types';
 import { UpstreamError } from '../types';
 
-async function fetchFromProxy(env: Env, path: string): Promise<Response> {
+async function fetchFromProxy(env: Env, path: string, accept = 'application/json'): Promise<Response> {
   const url = new URL(path, env.API_PROXY_BASE_URL);
-  return fetch(url.toString(), { headers: { Accept: 'application/json' } });
+  return fetch(url.toString(), { headers: { Accept: accept } });
 }
 
 /** Fetches all articles from api-proxy, newest-first (api-proxy/the API
@@ -57,6 +57,23 @@ export async function getArticleBySlug(env: Env, slug: string): Promise<Article 
     throw new UpstreamError(`GET /articles/${slug} failed with status ${response.status}`);
   }
   return response.json();
+}
+
+/** Fetches an article's raw Markdown 1:1 (no cleanup) via api-proxy's own
+ * .md route -- a distinct fetch from getArticleBySlug above, which returns
+ * api-proxy's rendered-HTML JSON shape instead. Backs both the per-article
+ * "View as Markdown" link and the /about.md route (same mechanism, just
+ * pointed at the fixed "about" slug). Returns null on a 404 (unknown/
+ * future-dated slug), mirroring getArticleBySlug. */
+export async function getArticleMarkdown(env: Env, slug: string): Promise<string | null> {
+  const response = await fetchFromProxy(env, `/articles/${encodeURIComponent(slug)}.md`, 'text/markdown');
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new UpstreamError(`GET /articles/${slug}.md failed with status ${response.status}`);
+  }
+  return response.text();
 }
 
 /** Fetches an article's published comments. Unlike every other fetch in
