@@ -77,15 +77,34 @@ export interface KnowledgeBaseChunk {
  * `topK` is inlined into the query text rather than passed as a parameter —
  * safe here since it's always this module's own numeric constant, never
  * user input; Cosmos's TOP clause parameter support is inconsistent enough
- * not to rely on across API versions. */
+ * not to rely on across API versions.
+ *
+ * `excludeText`, when given, adds a `WHERE c.text != @excludeText` clause —
+ * used by article-search.ts to exclude the "*Co-authored with Claude.*"
+ * byline chunk (appended to every article, embedded like any other
+ * paragraph) directly at the database level, not just filtered out of the
+ * results afterward. That distinction matters here: a live test 2026-09-16
+ * found this one chunk is so dominant for any query mentioning "Claude"
+ * that it fills the ENTIRE top-60 nearest-chunks pool across every article
+ * — a client-side post-filter would just leave zero real candidates behind
+ * to rank. retrieveChunks (used by /ask) never passes this, since an
+ * irrelevant chunk reaching generation there is far less harmful than one
+ * silently dominating a ranked results list. */
 async function queryPartition(
   env: Env,
   sourceType: SourceType,
   embedding: number[],
   topK: number,
+  excludeText?: string,
 ): Promise<KnowledgeBaseChunk[]> {
   const token = await getAccessToken(env);
   const url = `https://${env.COSMOS_ACCOUNT_NAME}.documents.azure.com/dbs/${DATABASE_NAME}/colls/${CONTAINER_NAME}/docs`;
+
+  const whereClause = excludeText ? 'WHERE c.text != @excludeText ' : '';
+  const parameters: { name: string; value: number[] | string }[] = [{ name: '@embedding', value: embedding }];
+  if (excludeText) {
+    parameters.push({ name: '@excludeText', value: excludeText });
+  }
 
   const response = await fetch(url, {
     method: 'POST',
@@ -112,8 +131,8 @@ async function queryPartition(
       // = more similar), not distance -- see retrieveChunks's own comment
       // for why that distinction mattered beyond just this one query.
       query: `SELECT TOP ${topK} c.id, c.sourceType, c.sourceSlug, c.text, VectorDistance(c.embedding, @embedding) AS score
-              FROM c ORDER BY VectorDistance(c.embedding, @embedding)`,
-      parameters: [{ name: '@embedding', value: embedding }],
+              FROM c ${whereClause}ORDER BY VectorDistance(c.embedding, @embedding)`,
+      parameters,
     }),
   });
 
@@ -177,8 +196,9 @@ export async function retrieveArticleChunkCandidates(
   env: Env,
   embedding: number[],
   candidatePoolSize: number,
+  excludeText?: string,
 ): Promise<KnowledgeBaseChunk[]> {
-  return queryPartition(env, 'article', embedding, candidatePoolSize);
+  return queryPartition(env, 'article', embedding, candidatePoolSize, excludeText);
 }
 
 /** Counts documents in one partition — same one-partition-at-a-time
