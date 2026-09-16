@@ -23,5 +23,8 @@ namespace Pat.Aca.BlogServiceApi
         // SeriesOrder/RelatedSlugs for what these mean.
         string? SeriesName = null,
         int? SeriesOrder = null,
-        List<string>? RelatedSlugs = null);
+        List<string>? RelatedSlugs = null,
+        // Pass-through, no required validation. See Article.Unlisted for
+        // what this means.
+        bool Unlisted = false);
 }

@@ -2,6 +2,14 @@ namespace Pat.Aca.BlogServiceApi
 {
     public interface IArticleRepository
     {
+        /// <summary>
+        /// Newest-first, future-publishedAt-excluded, and now also excludes
+        /// any article with <see cref="Article.Unlisted"/> set — an
+        /// unlisted article is still directly fetchable via <see
+        /// cref="GetArticleBySlugAsync"/>, just never shows up in this list
+        /// (or anything derived from it: the homepage, sitemap.xml,
+        /// feed.xml, the tag cloud).
+        /// </summary>
         Task<List<Article>> GetArticlesAsync();
 
         /// <summary>
@@ -23,10 +31,11 @@ namespace Pat.Aca.BlogServiceApi
         Task<Article?> GetArticleBySlugAsync(string slug);
 
         /// <summary>
-        /// Count of published articles only — same future-publishedAt
-        /// exclusion as <see cref="GetArticlesAsync"/>, without paying for
-        /// every article's full payload just to read a length. Backs the
-        /// site homepage's blog-post counter.
+        /// Count of published, listed articles only — same future-publishedAt
+        /// and <see cref="Article.Unlisted"/> exclusions as <see
+        /// cref="GetArticlesAsync"/>, without paying for every article's
+        /// full payload just to read a length. Backs the site homepage's
+        /// blog-post counter.
         /// </summary>
         Task<int> GetArticleCountAsync();
 

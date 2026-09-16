@@ -9,9 +9,10 @@ namespace Pat.Aca.BlogServiceApi
         };
 
         public Task<List<Article>> GetArticlesAsync() =>
-            // Mirrors CosmosArticleRepository: newest-first, future publishedAt excluded.
+            // Mirrors CosmosArticleRepository: newest-first, future publishedAt
+            // and Unlisted articles excluded.
             Task.FromResult(SeedArticles
-                .Where(a => a.PublishedAt <= DateTime.UtcNow)
+                .Where(a => a.PublishedAt <= DateTime.UtcNow && !a.Unlisted)
                 .OrderByDescending(a => a.PublishedAt)
                 .ToList());
 
@@ -40,7 +41,7 @@ namespace Pat.Aca.BlogServiceApi
             Task.FromResult(SeedArticles.FirstOrDefault(a => a.Slug == slug && a.PublishedAt <= DateTime.UtcNow));
 
         public Task<int> GetArticleCountAsync() =>
-            Task.FromResult(SeedArticles.Count(a => a.PublishedAt <= DateTime.UtcNow));
+            Task.FromResult(SeedArticles.Count(a => a.PublishedAt <= DateTime.UtcNow && !a.Unlisted));
 
         public Task<Article?> IncrementViewCountAsync(string slug)
         {
@@ -66,7 +67,7 @@ namespace Pat.Aca.BlogServiceApi
 
             // Id dropped from the write path per the BRD (legacy, never used
             // for lookups) — new articles just get 0.
-            var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>(), LinkedinVideoEmbedUrl: request.LinkedinVideoEmbedUrl, SeriesName: request.SeriesName, SeriesOrder: request.SeriesOrder, RelatedSlugs: request.RelatedSlugs);
+            var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>(), LinkedinVideoEmbedUrl: request.LinkedinVideoEmbedUrl, SeriesName: request.SeriesName, SeriesOrder: request.SeriesOrder, RelatedSlugs: request.RelatedSlugs, Unlisted: request.Unlisted);
             SeedArticles.Add(article);
             return Task.FromResult<Article?>(article);
         }
@@ -91,7 +92,8 @@ namespace Pat.Aca.BlogServiceApi
                 LinkedinVideoEmbedUrl = request.LinkedinVideoEmbedUrl,
                 SeriesName = request.SeriesName,
                 SeriesOrder = request.SeriesOrder,
-                RelatedSlugs = request.RelatedSlugs
+                RelatedSlugs = request.RelatedSlugs,
+                Unlisted = request.Unlisted
             };
             SeedArticles[index] = updated;
             return Task.FromResult<Article?>(updated);

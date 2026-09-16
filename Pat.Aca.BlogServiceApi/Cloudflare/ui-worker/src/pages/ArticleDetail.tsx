@@ -155,9 +155,14 @@ export const ArticleDetailPage: FC<{
       status={commentStatus}
       message={commentMessage}
     />
-    <a href="/" class="mt-6 block text-sm text-gray-500 transition hover:text-blue-600">
-      ← All articles
-    </a>
+    <div class="mt-6 flex items-center justify-between text-sm">
+      <a href="/" class="text-gray-500 transition hover:text-blue-600">
+        ← All articles
+      </a>
+      <a href={`/articles/${article.slug}.md`} class="text-gray-500 transition hover:text-blue-600">
+        View as Markdown
+      </a>
+    </div>
   </>
   );
 };

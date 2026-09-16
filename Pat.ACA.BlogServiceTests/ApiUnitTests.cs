@@ -276,6 +276,26 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task InMemoryArticleRepository_unlisted_article_excluded_from_list_and_count_but_fetchable_by_slug()
+        {
+            var repository = new InMemoryArticleRepository();
+            var request = new ArticleWriteRequest("unlisted-slug", "Unlisted Title", "Unlisted content.", "Unlisted summary.", DateTime.UtcNow.AddDays(-1), Unlisted: true);
+            var countBefore = await repository.GetArticleCountAsync();
+
+            var created = await repository.CreateArticleAsync(request);
+            var articles = await repository.GetArticlesAsync();
+            var countAfter = await repository.GetArticleCountAsync();
+            var fetchedBySlug = await repository.GetArticleBySlugAsync("unlisted-slug");
+
+            Assert.NotNull(created);
+            Assert.True(created!.Unlisted);
+            Assert.DoesNotContain(articles, a => a.Slug == "unlisted-slug");
+            Assert.Equal(countBefore, countAfter); // not counted either
+            Assert.NotNull(fetchedBySlug);
+            Assert.Equal("unlisted-slug", fetchedBySlug!.Slug);
+        }
+
+        [Fact]
         public async Task InMemoryArticleRepository_CreateArticleAsync_returns_null_for_duplicate_slug()
         {
             var repository = new InMemoryArticleRepository();

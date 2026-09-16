@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Env } from './types';
 import { UpstreamError } from './types';
-import { getArticleBySlug, getArticles, getArticlesPage, getComments, postComment } from './lib/blog-client';
+import { getArticleBySlug, getArticleMarkdown, getArticles, getArticlesPage, getComments, postComment } from './lib/blog-client';
 import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles';
 import { verifyTurnstile } from './lib/turnstile';
 import { escapeXml } from './lib/xml';
@@ -70,6 +70,28 @@ app.get('/tags/:tag', async (c) => {
       <TagPage tag={tag} articles={filtered} />
     </Layout>,
   );
+});
+
+// Raw Markdown, 1:1 with what's stored in Cosmos (no cleanup) — for AI
+// crawlers/agents and the article page's own "View as Markdown" link.
+// Registered *before* the generic `/articles/:slug` route below: Hono's
+// plain `:slug` param doesn't stop at ".", so it would otherwise swallow the
+// ".md" suffix straight into the slug itself and win the match first (found
+// via a real local test — the symptom was api-proxy's own .md route being
+// hit with a slug of "...actual-slug.md", round-tripping raw Markdown back
+// into this route's JSON-expecting getArticleBySlug and throwing a JSON
+// parse error). A regex param mixing a constraint with a literal suffix in
+// the same segment (`:slug{[^.]+}.md`) turned out not to work either — still
+// silently fell through to `/articles/:slug` in the same local test. What
+// does work: one regex param spanning the whole segment (`.+\.md`), with the
+// ".md" stripped by hand in the handler.
+app.get('/articles/:slugWithMd{.+\\.md}', async (c) => {
+  const slug = c.req.param('slugWithMd').replace(/\.md$/, '');
+  const markdown = await getArticleMarkdown(c.env, slug);
+  if (markdown === null) {
+    return c.notFound();
+  }
+  return c.body(markdown, 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
 });
 
 app.get('/articles/:slug', async (c) => {
@@ -141,6 +163,19 @@ app.get('/articles/:slug', async (c) => {
       />
     </Layout>,
   );
+});
+
+// Same raw-Markdown mechanism as the per-article .md route above, pointed at
+// the fixed "about" slug —
+// a CV-like document (skills, certs, side projects) stored as one more
+// (Unlisted) article, doubling as an llms.txt-style resource for AI
+// crawlers/recruiter-assistants.
+app.get('/about.md', async (c) => {
+  const markdown = await getArticleMarkdown(c.env, 'about');
+  if (markdown === null) {
+    return c.notFound();
+  }
+  return c.body(markdown, 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
 });
 
 // The comment form (CommentSection.tsx) posts here as a plain HTML form
