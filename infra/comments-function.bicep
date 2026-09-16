@@ -78,6 +78,13 @@ param autoPublishMinScore int = 6
 @description('System-message instructions sent to the LLM alongside each comment -- deployed as a plain app setting so wording can be tuned directly in the Function App\'s configuration, without a redeploy')
 param moderationSystemPrompt string = 'You are a content moderator for a personal blog\'s comment section. Given a reader\'s comment, score how safe it is to publish on a scale of 0 to 5: 0 means definitely do not publish, 5 means definitely fine to publish. Score low for offensive, hateful, or sexual content; commercial spam or advertising; and low-quality garbage (gibberish, irrelevant text, or obvious bot output). Score high for genuine, on-topic reader engagement, even if critical or negative in tone. Respond with ONLY a single JSON object, no other text, in exactly this shape: {"score": <integer 0-5>, "reason": "<one short sentence explaining the score>"}'
 
+@description('api-proxy\'s internal blog-post-count-sync endpoint (e.g. https://blog-api-proxy.pkoorevaar.workers.dev/internal/article-count) -- ArticleCountSyncFunction POSTs the recomputed count here on every Articles Change Feed delivery')
+param apiProxySetArticleCountUrl string = ''
+
+@secure()
+@description('Shared secret sent as X-Article-Count-Sync-Key when calling apiProxySetArticleCountUrl -- must match api-proxy\'s own ARTICLE_COUNT_SYNC_SECRET Worker secret')
+param apiProxyArticleCountSyncSecret string = ''
+
 var deploymentContainerName = 'app-package'
 
 // allowSharedKeyAccess: false -- identity-only access throughout (the
@@ -256,6 +263,14 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'AcsEmail__RecipientEmail'
           value: acsRecipientEmail
+        }
+        {
+          name: 'ApiProxy__SetArticleCountUrl'
+          value: apiProxySetArticleCountUrl
+        }
+        {
+          name: 'ApiProxy__ArticleCountSyncSecret'
+          value: apiProxyArticleCountSyncSecret
         }
       ]
     }

@@ -202,14 +202,40 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
-        public async Task InMemoryArticleRepository_GetArticleCountAsync_matches_GetArticlesAsync_count()
+        public async Task InMemoryArticleRepository_GetArticleCountAsync_is_never_smaller_than_GetArticlesAsync_count()
         {
+            // Relative, not an absolute number -- InMemoryArticleRepository's
+            // SeedArticles is a static list mutated by other tests'
+            // CreateArticleAsync calls (a known, accepted cross-test-fixture
+            // quirk, see InMemoryCommentRepository's own doc comment), so
+            // this only asserts the one invariant that must hold regardless
+            // of test run order: GetArticleCountAsync counts every
+            // non-unlisted article including future-dated ones, so it can
+            // never report fewer than GetArticlesAsync's (future-excluding)
+            // list. The dedicated future-dated test below proves they can
+            // actually diverge.
             var repository = new InMemoryArticleRepository();
 
             var count = await repository.GetArticleCountAsync();
             var articles = await repository.GetArticlesAsync();
 
-            Assert.Equal(articles.Count, count);
+            Assert.True(count >= articles.Count);
+        }
+
+        [Fact]
+        public async Task InMemoryArticleRepository_future_dated_article_counted_but_excluded_from_list()
+        {
+            var repository = new InMemoryArticleRepository();
+            var request = new ArticleWriteRequest("future-slug", "Future Title", "Future content.", "Future summary.", DateTime.UtcNow.AddDays(7));
+            var countBefore = await repository.GetArticleCountAsync();
+
+            var created = await repository.CreateArticleAsync(request);
+            var articles = await repository.GetArticlesAsync();
+            var countAfter = await repository.GetArticleCountAsync();
+
+            Assert.NotNull(created);
+            Assert.DoesNotContain(articles, a => a.Slug == "future-slug"); // still excluded from the public list
+            Assert.Equal(countBefore + 1, countAfter); // but counted -- unlike GetArticlesAsync's future-publishedAt exclusion
         }
 
         [Fact]

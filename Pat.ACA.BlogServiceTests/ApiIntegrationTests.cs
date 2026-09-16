@@ -202,8 +202,18 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
-        public async Task GET_articles_count_matches_the_published_article_count()
+        public async Task GET_articles_count_includes_future_dated_articles_unlike_the_published_list()
         {
+            // Not an exact number -- FakeArticleRepository's SeedArticles is
+            // a static list other tests' writes also mutate (a known,
+            // accepted cross-test-fixture quirk, see
+            // InMemoryCommentRepository's own doc comment), so this asserts
+            // the one invariant that must hold regardless of run order:
+            // GetArticleCountAsync counts every real blog post including the
+            // seeded future-dated "future-article", while GET /articles
+            // excludes future-dated articles -- so count must be strictly
+            // greater. See IArticleRepository.GetArticleCountAsync's doc
+            // comment for why they deliberately diverge.
             var articlesResponse = await _client.GetAsync("/articles");
             var articles = await articlesResponse.Content.ReadFromJsonAsync<List<Article>>();
 
@@ -211,7 +221,7 @@ namespace Pat.ACA.BlogServiceTests
             countResponse.EnsureSuccessStatusCode();
             var body = await countResponse.Content.ReadFromJsonAsync<JsonElement>();
 
-            Assert.Equal(articles!.Count, body.GetProperty("count").GetInt32());
+            Assert.True(body.GetProperty("count").GetInt32() > articles!.Count);
         }
 
         [Fact]

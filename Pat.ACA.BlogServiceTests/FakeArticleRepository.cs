@@ -40,8 +40,10 @@ public sealed class FakeArticleRepository : IArticleRepository
     public Task<Article?> GetArticleBySlugAsync(string slug) =>
         Task.FromResult(SeedArticles.FirstOrDefault(a => a.Slug == slug && a.PublishedAt <= DateTime.UtcNow));
 
+    // No publishedAt filter, unlike GetArticlesAsync -- counts every real
+    // blog post, published or scheduled, excluding only Unlisted content.
     public Task<int> GetArticleCountAsync() =>
-        Task.FromResult(SeedArticles.Count(a => a.PublishedAt <= DateTime.UtcNow && !a.Unlisted));
+        Task.FromResult(SeedArticles.Count(a => !a.Unlisted));
 
     public Task<Article?> IncrementViewCountAsync(string slug)
     {

@@ -44,6 +44,8 @@ jobs:
           ACS_CONNECTION_STRING: ${{ secrets.ACS_CONNECTION_STRING }}
           ACS_SENDER_ADDRESS: ${{ vars.ACS_SENDER_ADDRESS }}
           MODERATION_NOTIFICATION_EMAIL: ${{ vars.MODERATION_NOTIFICATION_EMAIL }}
+          API_PROXY_SET_ARTICLE_COUNT_URL: ${{ vars.API_PROXY_SET_ARTICLE_COUNT_URL }}
+          API_PROXY_ARTICLE_COUNT_SYNC_SECRET: ${{ secrets.API_PROXY_ARTICLE_COUNT_SYNC_SECRET }}
         run: |
           set -euo pipefail
 
@@ -59,7 +61,9 @@ jobs:
               cloudflareApiToken="$CLOUDFLARE_API_TOKEN" \
               acsConnectionString="$ACS_CONNECTION_STRING" \
               acsSenderAddress="$ACS_SENDER_ADDRESS" \
-              acsRecipientEmail="$MODERATION_NOTIFICATION_EMAIL"
+              acsRecipientEmail="$MODERATION_NOTIFICATION_EMAIL" \
+              apiProxySetArticleCountUrl="$API_PROXY_SET_ARTICLE_COUNT_URL" \
+              apiProxyArticleCountSyncSecret="$API_PROXY_ARTICLE_COUNT_SYNC_SECRET"
 
           # Moderation__ModerationModelId/DailyModerationQuota/
           # AutoPublishMinScore/ModerationSystemPrompt are deliberately not

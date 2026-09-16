@@ -204,6 +204,28 @@ resource commentsLeasesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatab
   }
 }
 
+// Lease container for ArticleCountSyncFunction's Cosmos DB Change Feed
+// trigger (blog-post counter, see the backlog item of that name) --
+// same shape/reasoning as commentsLeasesContainer above, just a separate
+// container since a Change Feed trigger's lease checkpoints are scoped
+// to one specific source container (Articles here, Comments there) and
+// can't share a lease container between the two.
+resource articlesLeasesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2023-11-15' = {
+  parent: database
+  name: 'ArticlesLeases'
+  properties: {
+    resource: {
+      id: 'ArticlesLeases'
+      partitionKey: {
+        paths: [
+          '/id'
+        ]
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
 // KnowledgeBase container for the AI chat assistant project (a separate
 // future project sharing this Cosmos account, see the backlog item "AI
 // chat/assistant that answers questions about Patrick" for the full design)
@@ -575,11 +597,29 @@ resource cosmosCommentsFunctionLeasesRoleAssignment 'Microsoft.DocumentDB/databa
   }
 }
 
+// Full read/write on ArticleCountSyncFunction's own lease container only --
+// same reasoning as cosmosCommentsFunctionLeasesRoleAssignment above.
+// blogCommentsFunctionPrincipalId already has Data Reader on Articles
+// itself (cosmosCommentsFunctionArticlesReaderRoleAssignment above,
+// originally added for CosmosArticleContextProvider) -- that's also
+// exactly what ArticleCountSyncFunction's own recompute query needs, so no
+// separate reader grant is required for it.
+resource cosmosCommentsFunctionArticlesLeasesRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(blogCommentsFunctionPrincipalId)) {
+  parent: account
+  name: guid(account.id, blogCommentsFunctionPrincipalId, 'Cosmos DB Built-in Data Contributor', 'ArticlesLeases')
+  properties: {
+    roleDefinitionId: resourceId('Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions', account.name, '00000000-0000-0000-0000-000000000002')
+    principalId: blogCommentsFunctionPrincipalId
+    scope: '${account.id}/dbs/${database.name}/colls/${articlesLeasesContainer.name}'
+  }
+}
+
 output cosmosAccountName string = account.name
 output cosmosDatabaseName string = database.name
 output cosmosContainerName string = container.name
 output cosmosCommentsContainerName string = commentsContainer.name
 output cosmosCommentsLeasesContainerName string = commentsLeasesContainer.name
+output cosmosArticlesLeasesContainerName string = articlesLeasesContainer.name
 output cosmosAssistantDatabaseName string = assistantDatabase.name
 output cosmosKnowledgeBaseContainerName string = knowledgeBaseContainer.name
 output cosmosEndpoint string = account.properties.documentEndpoint

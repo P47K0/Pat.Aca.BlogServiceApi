@@ -31,11 +31,17 @@ namespace Pat.Aca.BlogServiceApi
         Task<Article?> GetArticleBySlugAsync(string slug);
 
         /// <summary>
-        /// Count of published, listed articles only — same future-publishedAt
-        /// and <see cref="Article.Unlisted"/> exclusions as <see
-        /// cref="GetArticlesAsync"/>, without paying for every article's
-        /// full payload just to read a length. Backs the site homepage's
-        /// blog-post counter.
+        /// Count of every real blog post, published or scheduled — excludes
+        /// only <see cref="Article.Unlisted"/> content (e.g. /about), NOT
+        /// future-<c>publishedAt</c> articles (a deliberate difference from
+        /// <see cref="GetArticlesAsync"/>). Without paying for every
+        /// article's full payload just to read a length. Backs the site
+        /// homepage's blog-post counter, kept current in Cloudflare KV via a
+        /// Cosmos DB Change Feed-triggered Function so the read path never
+        /// has to hit this API directly (see the "blog-post counter" backlog
+        /// item) — the future-publishedAt exclusion was dropped specifically
+        /// so this count only changes on an actual Cosmos write, never on
+        /// wall-clock time alone.
         /// </summary>
         Task<int> GetArticleCountAsync();
 

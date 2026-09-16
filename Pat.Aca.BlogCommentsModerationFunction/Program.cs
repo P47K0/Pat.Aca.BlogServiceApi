@@ -30,10 +30,12 @@ var cosmosSettings = builder.Configuration.GetSection("CosmosDb").Get<CosmosSett
 var moderationSettings = builder.Configuration.GetSection("Moderation").Get<ModerationSettings>() ?? new ModerationSettings();
 var cloudflareSettings = builder.Configuration.GetSection("CloudflareWorkersAi").Get<CloudflareWorkersAiSettings>() ?? new CloudflareWorkersAiSettings();
 var acsSettings = builder.Configuration.GetSection("AcsEmail").Get<AcsEmailSettings>() ?? new AcsEmailSettings();
+var apiProxySettings = builder.Configuration.GetSection("ApiProxy").Get<ApiProxySettings>() ?? new ApiProxySettings();
 
 builder.Services.AddSingleton(moderationSettings);
 builder.Services.AddSingleton(cloudflareSettings);
 builder.Services.AddSingleton(acsSettings);
+builder.Services.AddSingleton(apiProxySettings);
 
 // One CosmosClient/Container for the whole Function, shared by
 // CosmosModerationQuotaStore and CommentStatusWriter -- see either
@@ -83,13 +85,20 @@ var articlesContainer = cosmosClient.GetDatabase(cosmosSettings.Database).GetCon
 builder.Services.AddSingleton<IArticleContextProvider>(sp =>
     new CosmosArticleContextProvider(articlesContainer, sp.GetRequiredService<ILogger<CosmosArticleContextProvider>>()));
 
+// Shares the same articlesContainer reference as IArticleContextProvider
+// above via closure, same reasoning as that registration's own comment --
+// no second Container/client for the same container.
+builder.Services.AddSingleton<IArticleCountRepository>(sp => new CosmosArticleCountRepository(articlesContainer));
+
 builder.Services.AddSingleton(sp => new EmailClient(acsSettings.ConnectionString));
 
 builder.Services.AddHttpClient<IModerationScorer, CloudflareWorkersAiScorer>();
 builder.Services.AddSingleton<IModerationNotifier, AcsModerationNotifier>();
 builder.Services.AddSingleton<IModerationQuotaStore, CosmosModerationQuotaStore>();
+builder.Services.AddHttpClient<IArticleCountPublisher, ApiProxyArticleCountPublisher>();
 builder.Services.AddSingleton<CommentStatusWriter>();
 builder.Services.AddSingleton<CommentModerationProcessor>();
 builder.Services.AddSingleton<StuckCommentSweeper>();
+builder.Services.AddSingleton<ArticleCountSyncProcessor>();
 
 builder.Build().Run();

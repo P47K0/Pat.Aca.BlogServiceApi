@@ -10,8 +10,16 @@ export interface Env {
   /** Durable (not per-colo, unlike the Cache API below) fallback store —
    * holds both the latest-10 article list snapshot and a per-slug snapshot
    * of every individual article ever fetched; see the fallback sections
-   * below. */
+   * below. Also holds the blog-post count under a third key (see "Article
+   * count" below) — same namespace, same "durable global store", just a
+   * different producer (ArticleCountSyncFunction, not this Worker itself). */
   ARTICLES_FALLBACK: KVNamespace;
+  /** Shared secret POST /internal/article-count requires as
+   * X-Article-Count-Sync-Key. Set via
+   * `wrangler secret put ARTICLE_COUNT_SYNC_SECRET` — never checked into
+   * wrangler.toml. Must match ArticleCountSyncFunction's own
+   * ApiProxy__ArticleCountSyncSecret app setting. */
+  ARTICLE_COUNT_SYNC_SECRET: string;
 }
 
 // Must match Pat.Aca.BlogServiceApi's ApiSecurity.ApiKeyHeaderName exactly.
@@ -245,57 +253,73 @@ async function revalidate(env: Env, pathname: string, search: string, key: Reque
 // --- Article count -----------------------------------------------------
 //
 // GET /articles/count backs the site's blog-post counter with a plain
-// integer instead of the full article list. Deliberately NOT routed through
-// fetchAndRender/revalidate above: both assume an Article or Article[] JSON
-// body and unconditionally markdown-render a `content` field via
-// marked.parse(), which throws given this route's actual `{ count }` shape.
-// Also deliberately checked before ARTICLE_SLUG_PATH in the dispatcher below
-// -- that regex would otherwise treat "count" as an article slug and route
+// integer. Unlike every other article route, this is now a PURE KV READ
+// with NO origin call at all -- not even the stale-while-revalidate
+// racing-with-a-durable-fallback shape the list/detail routes use. The
+// count in ARTICLES_FALLBACK is kept current by ArticleCountSyncFunction
+// (Pat.Aca.BlogCommentsModerationFunction), a Cosmos DB Change Feed
+// trigger on the Articles container that recomputes the count on every
+// write and POSTs it to POST /internal/article-count below -- so there's
+// structurally no cold-start dependency left on this read path at all,
+// rather than one that's merely hidden/raced most of the time. This is
+// what originally motivated this whole change: the list/detail SWR+KV-
+// fallback design still lets a true first-ever request pay a synchronous
+// cold start; a pure KV read never can.
+//
+// Deliberately checked before ARTICLE_SLUG_PATH in the dispatcher below --
+// that regex would otherwise treat "count" as an article slug and route
 // here into the wrong (article-shaped) machinery entirely.
 const ARTICLES_COUNT_PATH = '/articles/count';
+const ARTICLE_COUNT_KV_KEY = 'article-count';
 
-async function fetchCount(env: Env): Promise<Response> {
-  const upstreamUrl = new URL(ARTICLES_COUNT_PATH, env.API_BASE_URL);
-  const upstreamResponse = await fetch(upstreamUrl.toString(), {
-    method: 'GET',
-    headers: {
-      [API_KEY_HEADER]: env.ARTICLES_API_KEY,
-      Accept: 'application/json',
-    },
+async function readArticleCount(env: Env): Promise<Response> {
+  const stored = await env.ARTICLES_FALLBACK.get(ARTICLE_COUNT_KV_KEY);
+  // Missing only in the narrow window before ArticleCountSyncFunction has
+  // ever run for the first time (e.g. right after this feature's first
+  // deploy, before any article write has fired the Change Feed trigger
+  // once) -- 0 is a safe, honest default for that window rather than
+  // falling back to an origin call, which would reintroduce exactly the
+  // cold-start dependency this design exists to remove. Self-heals on the
+  // next real article write.
+  const count = stored === null ? 0 : Number(stored);
+
+  return new Response(JSON.stringify({ count }), {
+    status: 200,
+    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
   });
-
-  const headers = new Headers(upstreamResponse.headers);
-  for (const [key, value] of Object.entries(CORS_HEADERS)) {
-    headers.set(key, value);
-  }
-  if (upstreamResponse.ok) {
-    headers.set(CACHED_AT_HEADER, String(Date.now()));
-  }
-  return new Response(upstreamResponse.body, { status: upstreamResponse.status, headers });
 }
 
-/** Same stale-while-revalidate shape as proxyArticlesRequest, just its own
- * small self-contained version rather than reusing the article-shaped
- * fetchAndRender/revalidate -- a failed background refresh here simply
- * leaves the existing cached count in place, same failure behavior as
- * revalidate(). */
-async function proxyArticleCountRequest(env: Env, ctx: ExecutionContext, key: Request): Promise<Response> {
-  const cached = await cache.match(key);
-  if (cached) {
-    const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
-    if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
-      ctx.waitUntil(
-        fetchCount(env).then((response) => (response.ok ? cache.put(key, response.clone()) : undefined)),
-      );
-    }
-    return cached;
+// POST /internal/article-count -- ArticleCountSyncFunction's own write
+// path into ARTICLES_FALLBACK. Not a public route: never linked from the
+// site, and gated on a shared secret (mirrors assistant-worker's own
+// POST /internal/invalidate-cache pattern) rather than the public
+// ARTICLES_API_KEY, since this is a completely different trust
+// relationship (an Azure Function calling in, not a reader calling out).
+// Fails closed if the secret is unset/empty or doesn't match, same
+// posture as ApiSecurity.RequireApiKey in the sibling API project.
+const ARTICLE_COUNT_SYNC_PATH = '/internal/article-count';
+const ARTICLE_COUNT_SYNC_KEY_HEADER = 'X-Article-Count-Sync-Key';
+
+async function handleArticleCountSync(request: Request, env: Env): Promise<Response> {
+  const providedKey = request.headers.get(ARTICLE_COUNT_SYNC_KEY_HEADER);
+  if (!env.ARTICLE_COUNT_SYNC_SECRET || providedKey !== env.ARTICLE_COUNT_SYNC_SECRET) {
+    return new Response(null, { status: 401 });
   }
 
-  const response = await fetchCount(env);
-  if (response.ok) {
-    ctx.waitUntil(cache.put(key, response.clone()));
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(null, { status: 400 });
   }
-  return response;
+
+  const count = (body as { count?: unknown } | null)?.count;
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+    return new Response(null, { status: 400 });
+  }
+
+  await env.ARTICLES_FALLBACK.put(ARTICLE_COUNT_KV_KEY, String(count));
+  return new Response(null, { status: 204 });
 }
 
 // --- Article markdown --------------------------------------------------
@@ -309,8 +333,9 @@ async function proxyArticleCountRequest(env: Env, ctx: ExecutionContext, key: Re
 // just this same mechanism pointed at the fixed slug "about" -- the CV/about
 // document is an ordinary Article (Unlisted so it never shows up in the
 // list/sitemap/feed/tag cloud), not a separate resource. Gets the same
-// simple SWR treatment as fetchCount/proxyArticleCountRequest above, not the
-// full durable-KV-fallback machinery the HTML detail route gets: this is a
+// same simple per-colo SWR treatment article count used to get (before it
+// moved to a pure KV read, see "Article count" above), not the full
+// durable-KV-fallback machinery the HTML detail route gets: this is a
 // secondary, lower-traffic surface (crawlers, not the primary reader path),
 // so a slow cold start here just means a slower crawl, not a broken page.
 const ARTICLE_MD_PATH = /^\/articles\/([^/]+)\.md$/;
@@ -669,8 +694,17 @@ export default {
 
     const { pathname, search } = new URL(request.url);
 
-    // The one non-GET route this Worker supports — everything else stays
-    // GET-only, enforced below, not just by what CORS happens to allow.
+    // Internal, not public — never reached via CORS/a browser, just
+    // ArticleCountSyncFunction's own server-to-server call. Checked ahead
+    // of the generic method gate below since it's POST but isn't the
+    // reader-facing comments route.
+    if (request.method === 'POST' && pathname === ARTICLE_COUNT_SYNC_PATH) {
+      return handleArticleCountSync(request, env);
+    }
+
+    // The one *public* non-GET route this Worker supports — everything
+    // else reader-facing stays GET-only, enforced below, not just by what
+    // CORS happens to allow.
     if (request.method === 'POST' && ARTICLE_COMMENTS_PATH.test(pathname)) {
       return proxyCommentsPost(env, request, pathname);
     }
@@ -686,7 +720,7 @@ export default {
     // Checked before the generic /articles dispatch below -- ARTICLE_SLUG_PATH
     // would otherwise match this path too and treat "count" as an article slug.
     if (pathname === ARTICLES_COUNT_PATH) {
-      return proxyArticleCountRequest(env, ctx, cacheKeyFor(pathname, search, request.url));
+      return readArticleCount(env);
     }
 
     // Also checked before the generic dispatch -- these serve raw Markdown,
