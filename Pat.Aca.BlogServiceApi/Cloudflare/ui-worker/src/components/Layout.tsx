@@ -119,19 +119,20 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
             {/* All three items below use an explicit, absolute h-10 (2.5rem)
                 directly on the element that actually renders a box, so they
                 line up regardless of each one's own content (font size,
-                icon+text). Two earlier attempts at this both looked correct
-                on paper but were confirmed broken live, in different ways in
-                different browsers (Safari/Edge/Chrome) -- first
-                type="search" (its native shadow-DOM chrome resisted
-                appearance-none/height overrides entirely), then h-full
-                (a PERCENTAGE height) on the input inside a flex parent using
-                items-center rather than stretch -- percentage-height
-                resolution in that exact combination is a known
-                cross-browser trouble spot, which fits varying by browser
-                the way this did. Both are gone now: type="text" (no native
-                chrome to fight), and h-10 given directly to the input
-                itself as a plain absolute length -- no percentage
-                resolution involved anywhere, nothing left to disagree on. */}
+                icon+text). Confirmed via DevTools (2026-09-16) that the
+                input itself really does measure 40px tall as intended --
+                the remaining mismatch was still coming from somewhere else
+                in the chain. The one difference between the search item and
+                its two siblings: it's the only one with an extra wrapping
+                element (<form>) between it and this row. Tailwind's
+                Preflight resets default margin on many elements (headings,
+                p, blockquote, ...) but not <form> -- so a browser-default
+                form margin was a real, plausible remaining source of a few
+                px of offset. Removed it from the equation entirely: the
+                form is now `contents` (generates no box of its own), so the
+                <input> is a genuine direct flex child of this row, exactly
+                like the two <a> elements beside it -- nothing left in
+                between that could carry its own unaccounted-for box. */}
             <a
               href="/"
               class="inline-flex h-10 shrink-0 items-center text-xl font-semibold transition hover:text-blue-600"
@@ -140,11 +141,10 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
             </a>
             {/* Plain GET form, no client-side JS — submits straight to the
                 server-rendered /search results page (see SearchPage.tsx).
-                No height/flex classes needed on the form itself -- it's a
-                block-level element with one block-level child (the input),
-                so its own rendered box just matches that child's h-10 box
-                directly, no cross-axis alignment involved at all. */}
-            <form method="get" action="/search" class="min-w-0 flex-1">
+                `contents` so it doesn't generate its own box (see the
+                comment above) -- the flex/sizing classes that would
+                otherwise live here now live directly on the <input>. */}
+            <form method="get" action="/search" class="contents">
               <input
                 type="text"
                 enterkeyhint="search"
@@ -152,7 +152,7 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
                 value={searchQuery}
                 placeholder="Search…"
                 aria-label="Search articles"
-                class="h-10 w-full rounded-xl border border-gray-300 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
+                class="h-10 min-w-0 flex-1 rounded-xl border border-gray-300 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
               />
             </form>
             {/* Same button/copy/icon as the koorevaar.com contact page's Home
