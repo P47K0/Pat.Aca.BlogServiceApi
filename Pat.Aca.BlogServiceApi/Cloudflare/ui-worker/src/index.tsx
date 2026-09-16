@@ -103,6 +103,7 @@ app.get('/search', async (c) => {
       description={SITE_DESCRIPTION}
       canonicalUrl={`${c.env.SITE_URL}/search`}
       noindex
+      searchQuery={query}
     >
       <SearchPage query={query} articles={articles} errorMessage={errorMessage} />
     </Layout>,

@@ -25,6 +25,13 @@ export interface SeoProps {
   /** Pre-built schema.org object (BlogPosting for articles) serialized as a
    * JSON-LD <script> block. Left to the caller so Layout stays generic. */
   jsonLd?: Record<string, unknown>;
+  /** Pre-fills the header's own search box with the current query — set by
+   * the /search route so a visitor lands there without seeing what looks
+   * like two separate, empty search inputs (this header box, plus one that
+   * used to live on SearchPage.tsx itself, since removed for that reason).
+   * Every other page leaves this unset (empty box), which is correct there
+   * too — there's no "current query" outside the results page. */
+  searchQuery?: string;
 }
 
 export const Layout: FC<PropsWithChildren<SeoProps>> = ({
@@ -36,6 +43,7 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
   tags,
   noindex,
   jsonLd,
+  searchQuery = '',
   children,
 }) => {
   const fullTitle = `${title} · koorevaar.com Blog`;
@@ -112,14 +120,23 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
               Blog
             </a>
             {/* Plain GET form, no client-side JS — submits straight to the
-                server-rendered /search results page (see SearchPage.tsx). */}
-            <form method="get" action="/search" class="min-w-0 flex-1">
+                server-rendered /search results page (see SearchPage.tsx).
+                The form itself is a flex container (not just its input) so
+                its box height matches its siblings exactly under the outer
+                row's items-center — a plain block-level <form> wrapping a
+                native <input type="search"> otherwise renders slightly
+                taller in some browsers (native search-input chrome), which
+                threw off vertical centering against the "Blog" link and
+                Home button on either side. appearance-none on the input
+                strips that native styling for the same reason. */}
+            <form method="get" action="/search" class="flex min-w-0 flex-1 items-center">
               <input
                 type="search"
                 name="q"
+                value={searchQuery}
                 placeholder="Search…"
                 aria-label="Search articles"
-                class="w-full rounded-xl border border-gray-300 px-3 py-1.5 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
+                class="w-full appearance-none rounded-xl border border-gray-300 px-3 py-1.5 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none"
               />
             </form>
             {/* Same button/copy/icon as the koorevaar.com contact page's Home
