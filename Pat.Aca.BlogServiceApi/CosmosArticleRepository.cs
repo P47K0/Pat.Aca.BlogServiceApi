@@ -157,13 +157,18 @@ namespace Pat.Aca.BlogServiceApi
 
         public async Task<int> GetArticleCountAsync()
         {
-            // Same future-publishedAt and unlisted exclusions as
-            // GetArticlesAsync, but a plain scalar count instead of fetching
-            // every article's full document just to read a length.
+            // Deliberately NOT the same future-publishedAt exclusion as
+            // GetArticlesAsync -- the blog-post counter this backs is meant
+            // to count every real blog post, published or scheduled, only
+            // excluding Unlisted "not really a post" content (e.g. /about).
+            // No @now parameter needed as a result, which also means this
+            // count only ever changes on an actual Cosmos write (create, or
+            // an Unlisted toggle) -- never just because wall-clock time
+            // passed a scheduled publishedAt -- which is what lets the
+            // Cosmos Change Feed-driven KV sync (see the "blog-post counter"
+            // backlog item) stay correct without any periodic re-sync.
             var query = new QueryDefinition(
-                "SELECT VALUE COUNT(1) FROM c WHERE c.publishedAt <= @now " +
-                "AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false)")
-                .WithParameter("@now", DateTime.UtcNow);
+                "SELECT VALUE COUNT(1) FROM c WHERE (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false)");
 
             using FeedIterator<int> iterator = _container.GetItemQueryIterator<int>(query);
             var count = 0;

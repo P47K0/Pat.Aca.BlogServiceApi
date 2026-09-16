@@ -11,13 +11,22 @@ compatibility_date = "2026-08-25"
 # it's not sensitive, same idea as an appsettings.json value in the API repo.
 # The API key IS a secret and must never go here — set it with:
 #   wrangler secret put ARTICLES_API_KEY
+#
+# POST /internal/article-count's own shared secret is likewise never set
+# here — it's a secret too:
+#   wrangler secret put ARTICLE_COUNT_SYNC_SECRET
+# Must match ArticleCountSyncFunction's own ApiProxy__ArticleCountSyncSecret
+# app setting (Pat.Aca.BlogCommentsModerationFunction).
 [vars]
 API_BASE_URL = "https://blog-service-api.whitewater-2e220d9b.westeurope.azurecontainerapps.io"
 
 # Durable (global, not per-colo like the Cache API) fallback store — holds
-# both the latest-10 article list snapshot and a per-slug snapshot of every
-# individual article ever fetched. See the "Durable list fallback" and
-# "Durable detail fallback" sections in src/index.ts.
+# the latest-10 article list snapshot, a per-slug snapshot of every
+# individual article ever fetched, AND (as of the "blog-post counter"
+# backlog item) the blog-post count itself, kept current by
+# ArticleCountSyncFunction's POST /internal/article-count calls rather than
+# by this Worker fetching/caching it. See the "Durable list fallback",
+# "Durable detail fallback", and "Article count" sections in src/index.ts.
 [[kv_namespaces]]
 binding = "ARTICLES_FALLBACK"
 id = "7de6876ca4354e2986728cc321cccbbc"
