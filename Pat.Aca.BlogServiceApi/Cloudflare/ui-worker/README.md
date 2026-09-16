@@ -24,6 +24,12 @@ This Worker's only job is routing + page templates.
 - `GET /articles/:slug` — full article, with its already-rendered HTML
   content injected directly (see the comment in `ArticleDetail.tsx` for the
   trust rationale — content is hand-authored in Cosmos, never user-submitted).
+- `GET /search` — blog search (a query box lives in the header on every
+  page). A plain `<form method="get">`, no client-side JS. Reuses
+  `assistant-worker`'s KnowledgeBase embeddings (retrieval + ranking only, no
+  LLM generation) via a server-to-server call from this route handler,
+  authenticated with a shared secret and forwarding the real visitor IP for
+  that Worker's own rate limiting — see `search-client.ts`.
 
 Styling is [Tailwind via the Play CDN](https://tailwindcss.com/docs/installation/play-cdn)
 (`?plugins=typography` for the article `prose` styling) — no build step, no
@@ -40,6 +46,12 @@ npx wrangler login          # one-time, opens a browser to authorize this machin
 Before deploying, edit `wrangler.toml`'s `API_PROXY_BASE_URL` to api-proxy's
 actual deployed URL (its `*.workers.dev` subdomain, or a custom domain if it's
 later given one) — the scaffolded value is a placeholder.
+
+`SEARCH_SECRET` (sent to assistant-worker as `X-Search-Key` on every
+`GET /search` call) is set the same off-`wrangler.toml` way as
+`TURNSTILE_SECRET_KEY` — pick any random value and configure the identical
+value as assistant-worker's own `SEARCH_SECRET`
+(`wrangler secret put SEARCH_SECRET` on both Workers).
 
 ## Deploy
 

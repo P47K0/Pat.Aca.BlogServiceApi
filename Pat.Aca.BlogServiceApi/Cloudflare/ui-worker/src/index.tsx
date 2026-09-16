@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
-import type { Env } from './types';
+import type { Article, Env } from './types';
 import { UpstreamError } from './types';
 import { getArticleBySlug, getArticleMarkdown, getArticles, getArticlesPage, getComments, postComment } from './lib/blog-client';
 import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles';
+import { searchAssistant, resolveSearchResults } from './lib/search-client';
 import { verifyTurnstile } from './lib/turnstile';
 import { escapeXml } from './lib/xml';
 import { Layout } from './components/Layout';
@@ -11,6 +12,7 @@ import { ArticlesFragment } from './components/ArticlesFragment';
 import { HomePage, LOAD_MORE_PAGE_SIZE } from './pages/Home';
 import { TagPage } from './pages/TagPage';
 import { ArticleDetailPage } from './pages/ArticleDetail';
+import { SearchPage } from './pages/SearchPage';
 import { NotFoundPage } from './pages/NotFound';
 import { ErrorPage } from './pages/ErrorPage';
 
@@ -68,6 +70,41 @@ app.get('/tags/:tag', async (c) => {
       canonicalUrl={`${c.env.SITE_URL}/tags/${encodeURIComponent(tag)}`}
     >
       <TagPage tag={tag} articles={filtered} />
+    </Layout>,
+  );
+});
+
+// Blog search — reuses the KnowledgeBase embeddings already built for the
+// site's AI assistant (assistant-worker), retrieval + ranking only, no LLM
+// generation involved. A plain GET so the query survives in the URL (back
+// button, bookmarking, sharing a search link) and works with JS disabled,
+// matching this site's existing no-client-JS-except-infinite-scroll
+// minimalism. `noindex`: a results page for an arbitrary query string isn't
+// something search engines should index, same reasoning as the 404/error
+// pages.
+app.get('/search', async (c) => {
+  const query = (c.req.query('q') ?? '').trim();
+  const clientIp = c.req.header('CF-Connecting-IP') ?? '';
+
+  let articles: Article[] = [];
+  let errorMessage: string | undefined;
+  if (query !== '') {
+    const outcome = await searchAssistant(c.env, query, clientIp);
+    if (outcome.ok) {
+      articles = await resolveSearchResults(c.env, outcome.results);
+    } else {
+      errorMessage = outcome.message;
+    }
+  }
+
+  return c.html(
+    <Layout
+      title={query ? `Search: ${query}` : 'Search'}
+      description={SITE_DESCRIPTION}
+      canonicalUrl={`${c.env.SITE_URL}/search`}
+      noindex
+    >
+      <SearchPage query={query} articles={articles} errorMessage={errorMessage} />
     </Layout>,
   );
 });

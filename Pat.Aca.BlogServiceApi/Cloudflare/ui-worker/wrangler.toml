@@ -35,6 +35,17 @@ SITE_URL = "https://blog.koorevaar.com"
 # the real site key here. The paired secret key goes in via
 # `wrangler secret put TURNSTILE_SECRET_KEY`, never here.
 TURNSTILE_SITE_KEY = "0x4AAAAAAEuW1UZyrV4YDywH"
+# Base URL of the assistant-worker Worker — reused here for blog search
+# (GET /search), since KnowledgeBase's article embeddings already live there
+# for the site's AI assistant. Not a secret, same idea as
+# API_PROXY_BASE_URL above.
+ASSISTANT_WORKER_BASE_URL = "https://ai-assistant.koorevaar.com"
+# SEARCH_SECRET (sent as X-Search-Key when calling assistant-worker's
+# GET /search) is NOT set here -- same off-wrangler.toml Secret treatment as
+# TURNSTILE_SECRET_KEY above, and the same reasoning: a plain-text [vars]
+# entry gets wiped by the next `wrangler deploy`, a Secret-type value
+# doesn't. Set via `wrangler secret put SEARCH_SECRET`, using the identical
+# value configured as assistant-worker's own SEARCH_SECRET.
 
 # Persists console.log/console.error output so the dashboard's Logs tab shows
 # past requests, not just a live stream started after the fact — without
