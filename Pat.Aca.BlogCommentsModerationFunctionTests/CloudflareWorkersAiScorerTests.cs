@@ -57,6 +57,53 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
         }
 
         [Fact]
+        public void ParseModelResponseText_parses_json_with_a_stray_trailing_closing_brace()
+        {
+            // Regression test for a real production incident (2026-09-16):
+            // the model appended one extra "}" after an otherwise
+            // well-formed object -- {"score": "4", "reason": "..."}} --
+            // which JsonSerializer rejects as trailing data even though the
+            // object itself is perfectly parseable, silently downgrading a
+            // real score of 4 to the fail-safe 0.
+            var score = CloudflareWorkersAiScorer.ParseModelResponseText(
+                "{\"score\": \"4\", \"reason\": \"Generally safe.\"}}");
+
+            Assert.Equal(4, score.Score);
+            Assert.Equal("Generally safe.", score.Reason);
+        }
+
+        [Fact]
+        public void ParseModelResponseText_parses_json_with_trailing_prose_after_the_object()
+        {
+            var score = CloudflareWorkersAiScorer.ParseModelResponseText(
+                "{\"score\": 5, \"reason\": \"Fine.\"} Let me know if you need anything else!");
+
+            Assert.Equal(5, score.Score);
+        }
+
+        [Fact]
+        public void ParseModelResponseText_does_not_miscount_braces_mentioned_inside_the_reason_text()
+        {
+            var score = CloudflareWorkersAiScorer.ParseModelResponseText(
+                "{\"score\": 4, \"reason\": \"References a code sample using {} braces.\"}");
+
+            Assert.Equal(4, score.Score);
+            Assert.Equal("References a code sample using {} braces.", score.Reason);
+        }
+
+        [Fact]
+        public void ParseModelResponseText_fails_safe_to_zero_for_a_truncated_response_that_never_closes()
+        {
+            // Distinct from the stray-trailing-brace case above -- here the
+            // object never balances at all (cut off mid-response), which
+            // genuinely can't be recovered and must still fail safe.
+            var score = CloudflareWorkersAiScorer.ParseModelResponseText("{\"score\": 3, \"reason\": \"Low");
+
+            Assert.Equal(0, score.Score);
+            Assert.Contains("Could not parse", score.Reason);
+        }
+
+        [Fact]
         public void ParseModelResponseText_fails_safe_to_zero_for_malformed_json()
         {
             var score = CloudflareWorkersAiScorer.ParseModelResponseText("not json at all");
