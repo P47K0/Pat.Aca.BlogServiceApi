@@ -61,4 +61,4 @@ Reads are for the Cloudflare Workers serving the public site. Article writes are
 A submitted comment always lands at `status: queued` first. `Pat.Aca.BlogCommentsModerationFunction` picks it up via a Cosmos DB Change Feed trigger, scores it with Cloudflare Workers AI against a configurable prompt (`Moderation__ModerationSystemPrompt`), and — as long as today's `Moderation__DailyModerationQuota` isn't exhausted — patches its status to `unpublished` (the default, for manual review) or `published` (only if the score meets `Moderation__AutoPublishMinScore`, which starts above the maximum possible score so nothing auto-publishes until that's deliberately lowered). Either way, a review-alert email goes out via Azure Communication Services. A comment left `queued` after a scoring failure or exhausted quota is recovered by an hourly sweep, not retried immediately (to avoid hammering a genuinely down dependency).
 
 ### See it in action!
-blog.koorevaar.com
+https://blog.koorevaar.com
