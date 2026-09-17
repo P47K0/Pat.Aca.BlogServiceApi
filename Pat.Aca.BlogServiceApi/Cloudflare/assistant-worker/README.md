@@ -98,6 +98,10 @@ value and configure the identical value as `ui-worker`'s own `SEARCH_SECRET`
 
 ## Deploy
 
+Cloudflare's Git integration watches this repo and deploys automatically on
+push — no GitHub Actions workflow needed for this Worker. `npm run deploy`
+still works for a manual/local deploy (e.g. testing a change before pushing):
+
 ```bash
 npm run deploy
 ```
