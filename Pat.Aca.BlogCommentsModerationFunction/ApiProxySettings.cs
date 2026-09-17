@@ -18,7 +18,24 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         /// Shared secret sent as the X-Article-Count-Sync-Key header --
         /// must match api-proxy's own ARTICLE_COUNT_SYNC_SECRET, which fails
         /// the request closed if this doesn't match (or is empty).
+        ///
+        /// Deliberately reused as-is (not renamed/split) for
+        /// SetMostViewedArticleUrl below too -- both are the same trust
+        /// relationship (this Function calling its own api-proxy Worker's
+        /// internal endpoints), and introducing a second secret here means
+        /// redoing the exact three-different-names deployment coordination
+        /// (GitHub Actions secret / this app setting / the Worker secret)
+        /// that already caused real production debugging pain for the
+        /// article-count feature. The name being count-specific is a minor
+        /// cosmetic mismatch, not worth that cost.
         /// </summary>
         public string ArticleCountSyncSecret { get; set; } = string.Empty;
+
+        /// <summary>
+        /// api-proxy's internal endpoint for the most-viewed-article sync
+        /// (see MostViewedSyncFunction), authenticated with the same
+        /// ArticleCountSyncSecret above.
+        /// </summary>
+        public string SetMostViewedArticleUrl { get; set; } = string.Empty;
     }
 }

@@ -45,6 +45,18 @@ public sealed class FakeArticleRepository : IArticleRepository
     public Task<int> GetArticleCountAsync() =>
         Task.FromResult(SeedArticles.Count(a => !a.Unlisted));
 
+    public Task<MostViewedArticle?> GetMostViewedArticleAsync()
+    {
+        var top = SeedArticles
+            .Where(a => a.PublishedAt <= DateTime.UtcNow && !a.Unlisted)
+            .OrderByDescending(a => a.ViewCount)
+            .FirstOrDefault();
+
+        return Task.FromResult(top is null
+            ? null
+            : new MostViewedArticle(top.Slug, top.Title, top.Summary, top.ViewCount));
+    }
+
     public Task<Article?> IncrementViewCountAsync(string slug)
     {
         var index = SeedArticles.FindIndex(a => a.Slug == slug && a.PublishedAt <= DateTime.UtcNow);

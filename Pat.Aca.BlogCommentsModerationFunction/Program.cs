@@ -89,6 +89,7 @@ builder.Services.AddSingleton<IArticleContextProvider>(sp =>
 // above via closure, same reasoning as that registration's own comment --
 // no second Container/client for the same container.
 builder.Services.AddSingleton<IArticleCountRepository>(sp => new CosmosArticleCountRepository(articlesContainer));
+builder.Services.AddSingleton<IMostViewedArticleRepository>(sp => new CosmosMostViewedArticleRepository(articlesContainer));
 
 builder.Services.AddSingleton(sp => new EmailClient(acsSettings.ConnectionString));
 
@@ -96,9 +97,11 @@ builder.Services.AddHttpClient<IModerationScorer, CloudflareWorkersAiScorer>();
 builder.Services.AddSingleton<IModerationNotifier, AcsModerationNotifier>();
 builder.Services.AddSingleton<IModerationQuotaStore, CosmosModerationQuotaStore>();
 builder.Services.AddHttpClient<IArticleCountPublisher, ApiProxyArticleCountPublisher>();
+builder.Services.AddHttpClient<IMostViewedArticlePublisher, ApiProxyMostViewedArticlePublisher>();
 builder.Services.AddSingleton<CommentStatusWriter>();
 builder.Services.AddSingleton<CommentModerationProcessor>();
 builder.Services.AddSingleton<StuckCommentSweeper>();
 builder.Services.AddSingleton<ArticleCountSyncProcessor>();
+builder.Services.AddSingleton<MostViewedSyncProcessor>();
 
 builder.Build().Run();

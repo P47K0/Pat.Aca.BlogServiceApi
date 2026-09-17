@@ -181,6 +181,59 @@ namespace Pat.Aca.BlogServiceApi
             return count;
         }
 
+        public async Task<MostViewedArticle?> GetMostViewedArticleAsync()
+        {
+            // Unlike GetArticleCountAsync, this DOES keep the future-
+            // publishedAt and unlisted exclusions -- this points a reader at
+            // something clickable, so it must never surface a scheduled or
+            // unlisted article. ORDER BY viewCount DESC is index-assisted
+            // (viewCount isn't excluded from the container's default
+            // indexing policy), so this is cheap per call; what makes it
+            // unsuitable for the count feature's Change-Feed-per-write
+            // pattern is call frequency, not per-call cost -- ViewCount
+            // changes on every article read, not just rare edits, so this
+            // is synced to KV via a periodic TimerTrigger Function instead
+            // (see IArticleRepository's own doc comment).
+            var query = new QueryDefinition(
+                "SELECT TOP 1 c.slug, c.title, c.summary, c.viewCount FROM c " +
+                "WHERE c.publishedAt <= @now AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false) " +
+                "ORDER BY c.viewCount DESC")
+                .WithParameter("@now", DateTime.UtcNow);
+
+            using FeedIterator<MostViewedArticleDocument> iterator =
+                _container.GetItemQueryIterator<MostViewedArticleDocument>(query);
+
+            while (iterator.HasMoreResults)
+            {
+                FeedResponse<MostViewedArticleDocument> response = await iterator.ReadNextAsync();
+                var top = response.Resource.FirstOrDefault();
+                if (top is not null)
+                {
+                    return new MostViewedArticle(top.Slug, top.Title, top.Summary, top.ViewCount);
+                }
+            }
+
+            return null;
+        }
+
+        // Narrow projection shape for GetMostViewedArticleAsync's SELECT --
+        // only the four fields that query actually returns, not the full
+        // ArticleDocument below.
+        private sealed class MostViewedArticleDocument
+        {
+            [JsonProperty("slug")]
+            public string Slug { get; set; } = string.Empty;
+
+            [JsonProperty("title")]
+            public string Title { get; set; } = string.Empty;
+
+            [JsonProperty("summary")]
+            public string Summary { get; set; } = string.Empty;
+
+            [JsonProperty("viewCount")]
+            public int ViewCount { get; set; }
+        }
+
         public async Task<ArticlesPage> GetArticlesPageAsync(int limit, string? afterSlug)
         {
             // Cursor is the previous page's last article's slug. Resolve it

@@ -322,6 +322,80 @@ async function handleArticleCountSync(request: Request, env: Env): Promise<Respo
   return new Response(null, { status: 204 });
 }
 
+// --- Most-viewed article -------------------------------------------------
+//
+// Backs the homepage's "most-viewed post" link (see the backlog item of
+// that name). Kept current by MostViewedSyncFunction, a twice-daily
+// TimerTrigger -- NOT a Change-Feed reaction like article count, since
+// ViewCount changes on every article read, far too often to react to
+// per-write the way the count feature does. Reuses the article-count
+// sync's own secret (ARTICLE_COUNT_SYNC_SECRET/X-Article-Count-Sync-Key)
+// rather than a second one -- same trust relationship (this project's own
+// Function calling in), see ApiProxySettings.ArticleCountSyncSecret's doc
+// comment in the Function project for why.
+const MOST_VIEWED_ARTICLE_PATH = '/articles/most-viewed';
+const MOST_VIEWED_ARTICLE_KV_KEY = 'most-viewed-article';
+// Comfortably longer than the twice-daily sync interval (12h) -- not the
+// primary refresh mechanism (the TimerTrigger overwrites this well before
+// it'd ever expire), just a safety net so a silently-broken sync
+// eventually surfaces as "nothing to show" rather than serving
+// indefinitely stale data forever.
+const MOST_VIEWED_ARTICLE_KV_TTL_SECONDS = 60 * 60 * 48;
+
+async function readMostViewedArticle(env: Env): Promise<Response> {
+  const stored = await env.ARTICLES_FALLBACK.get(MOST_VIEWED_ARTICLE_KV_KEY);
+  if (stored === null) {
+    // Nothing synced yet (e.g. right after this feature's first deploy,
+    // before MostViewedSyncFunction has run once) -- no fallback to
+    // origin, same reasoning as readArticleCount above. ui-worker just
+    // hides the widget on a 204.
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
+  return new Response(stored, {
+    status: 200,
+    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+  });
+}
+
+const MOST_VIEWED_ARTICLE_SYNC_PATH = '/internal/most-viewed-article';
+
+async function handleMostViewedArticleSync(request: Request, env: Env): Promise<Response> {
+  const providedKey = request.headers.get(ARTICLE_COUNT_SYNC_KEY_HEADER);
+  if (!env.ARTICLE_COUNT_SYNC_SECRET || providedKey !== env.ARTICLE_COUNT_SYNC_SECRET) {
+    return new Response(null, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+
+  const candidate = body as { slug?: unknown; title?: unknown; summary?: unknown; viewCount?: unknown } | null;
+  if (
+    typeof candidate?.slug !== 'string' || !candidate.slug ||
+    typeof candidate.title !== 'string' || !candidate.title ||
+    typeof candidate.summary !== 'string' ||
+    typeof candidate.viewCount !== 'number' || !Number.isInteger(candidate.viewCount) || candidate.viewCount < 0
+  ) {
+    return new Response(null, { status: 400 });
+  }
+
+  await env.ARTICLES_FALLBACK.put(
+    MOST_VIEWED_ARTICLE_KV_KEY,
+    JSON.stringify({
+      slug: candidate.slug,
+      title: candidate.title,
+      summary: candidate.summary,
+      viewCount: candidate.viewCount,
+    }),
+    { expirationTtl: MOST_VIEWED_ARTICLE_KV_TTL_SECONDS },
+  );
+  return new Response(null, { status: 204 });
+}
+
 // --- Article markdown --------------------------------------------------
 //
 // GET /articles/{slug}.md and GET /about.md serve the raw Markdown `content`
@@ -702,6 +776,12 @@ export default {
       return handleArticleCountSync(request, env);
     }
 
+    // Same internal-only reasoning as above -- MostViewedSyncFunction's own
+    // server-to-server call.
+    if (request.method === 'POST' && pathname === MOST_VIEWED_ARTICLE_SYNC_PATH) {
+      return handleMostViewedArticleSync(request, env);
+    }
+
     // The one *public* non-GET route this Worker supports — everything
     // else reader-facing stays GET-only, enforced below, not just by what
     // CORS happens to allow.
@@ -721,6 +801,12 @@ export default {
     // would otherwise match this path too and treat "count" as an article slug.
     if (pathname === ARTICLES_COUNT_PATH) {
       return readArticleCount(env);
+    }
+
+    // Same reasoning -- ARTICLE_SLUG_PATH would otherwise treat
+    // "most-viewed" as an article slug.
+    if (pathname === MOST_VIEWED_ARTICLE_PATH) {
+      return readMostViewedArticle(env);
     }
 
     // Also checked before the generic dispatch -- these serve raw Markdown,
