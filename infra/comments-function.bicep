@@ -82,8 +82,11 @@ param moderationSystemPrompt string = 'You are a content moderator for a persona
 param apiProxySetArticleCountUrl string = ''
 
 @secure()
-@description('Shared secret sent as X-Article-Count-Sync-Key when calling apiProxySetArticleCountUrl -- must match api-proxy\'s own ARTICLE_COUNT_SYNC_SECRET Worker secret')
+@description('Shared secret sent as X-Article-Count-Sync-Key when calling apiProxySetArticleCountUrl -- must match api-proxy\'s own ARTICLE_COUNT_SYNC_SECRET Worker secret. Also reused (deliberately, not a second secret) for apiProxySetMostViewedArticleUrl below -- same trust relationship, see ApiProxySettings.ArticleCountSyncSecret\'s own doc comment')
 param apiProxyArticleCountSyncSecret string = ''
+
+@description('api-proxy\'s internal most-viewed-article-sync endpoint (e.g. https://blog-api-proxy.pkoorevaar.workers.dev/internal/most-viewed-article) -- MostViewedSyncFunction POSTs the current most-viewed article here twice a day')
+param apiProxySetMostViewedArticleUrl string = ''
 
 var deploymentContainerName = 'app-package'
 
@@ -271,6 +274,10 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'ApiProxy__ArticleCountSyncSecret'
           value: apiProxyArticleCountSyncSecret
+        }
+        {
+          name: 'ApiProxy__SetMostViewedArticleUrl'
+          value: apiProxySetMostViewedArticleUrl
         }
       ]
     }

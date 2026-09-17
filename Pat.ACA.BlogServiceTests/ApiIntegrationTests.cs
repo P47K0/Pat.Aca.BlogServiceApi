@@ -233,6 +233,30 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task GET_articles_most_viewed_returns_a_published_listed_article()
+        {
+            using var response = await _client.GetAsync("/articles/most-viewed");
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+            // Never the seeded future-dated article, regardless of its
+            // (always-zero, since IncrementViewCountAsync can't touch it)
+            // ViewCount -- see IArticleRepository.GetMostViewedArticleAsync's
+            // doc comment for why this must never point at something not
+            // publicly visible.
+            Assert.NotEqual("future-article", body.GetProperty("slug").GetString());
+            Assert.True(body.GetProperty("viewCount").GetInt32() >= 0);
+        }
+
+        [Fact]
+        public async Task GET_articles_most_viewed_returns_401_problem_details_without_api_key()
+        {
+            using var response = await _clientWithoutApiKey.GetAsync("/articles/most-viewed");
+
+            await AssertProblemDetailsAsync(response, 401);
+        }
+
+        [Fact]
         public async Task GET_unmatched_route_returns_404_problem_details()
         {
             using var response = await _client.GetAsync("/totally/not/a/route");

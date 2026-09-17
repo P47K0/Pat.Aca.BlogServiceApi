@@ -46,6 +46,20 @@ namespace Pat.Aca.BlogServiceApi
         Task<int> GetArticleCountAsync();
 
         /// <summary>
+        /// The single published, listed article with the highest ViewCount —
+        /// same future-publishedAt and Unlisted exclusions as <see
+        /// cref="GetArticlesAsync"/> (unlike <see cref="GetArticleCountAsync"/>'s
+        /// deliberate difference), since this backs a homepage link a reader
+        /// can actually click — it must never point at something not
+        /// publicly visible. Null if there are no eligible articles at all.
+        /// Kept current in Cloudflare KV via a periodic (twice-daily)
+        /// TimerTrigger Function rather than reacting to every view, since
+        /// ViewCount changes on every article read, far too often to
+        /// recompute this on each change the way GetArticleCountAsync does.
+        /// </summary>
+        Task<MostViewedArticle?> GetMostViewedArticleAsync();
+
+        /// <summary>
         /// Atomically-intended increment of an article's view count. Returns the
         /// updated article, or null if <paramref name="slug"/> doesn't match a
         /// published article (mirrors <see cref="GetArticleBySlugAsync"/>'s

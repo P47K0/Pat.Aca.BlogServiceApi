@@ -327,6 +327,21 @@ app.MapGet("/articles/count", async (IArticleRepository articleRepository) =>
     .RequireRateLimiting(ArticlesRateLimiterPolicy)
     .AddEndpointFilter(RequireApiKey);
 
+// Backs the homepage's "most-viewed post" link (see the backlog item of
+// that name). ASP.NET Core's routing resolves this literal route ahead of
+// the parameterized /articles/{slug} below regardless of registration
+// order, so "most-viewed" is never treated as a slug the way api-proxy's
+// own manual string dispatch has to guard against explicitly.
+app.MapGet("/articles/most-viewed", async Task<IResult> (IArticleRepository articleRepository) =>
+{
+    var mostViewed = await articleRepository.GetMostViewedArticleAsync();
+    return mostViewed is null
+        ? Results.Problem("No eligible articles", statusCode: StatusCodes.Status404NotFound)
+        : Results.Json(mostViewed);
+})
+    .RequireRateLimiting(ArticlesRateLimiterPolicy)
+    .AddEndpointFilter(RequireApiKey);
+
 app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleRepository articleRepository, ILogger<Program> logger) =>
 {
     if (string.IsNullOrEmpty(slug))

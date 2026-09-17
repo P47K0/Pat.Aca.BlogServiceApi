@@ -46,6 +46,7 @@ jobs:
           MODERATION_NOTIFICATION_EMAIL: ${{ vars.MODERATION_NOTIFICATION_EMAIL }}
           API_PROXY_SET_ARTICLE_COUNT_URL: ${{ vars.API_PROXY_SET_ARTICLE_COUNT_URL }}
           API_PROXY_ARTICLE_COUNT_SYNC_SECRET: ${{ secrets.API_PROXY_ARTICLE_COUNT_SYNC_SECRET }}
+          API_PROXY_SET_MOST_VIEWED_ARTICLE_URL: ${{ vars.API_PROXY_SET_MOST_VIEWED_ARTICLE_URL }}
         run: |
           set -euo pipefail
 
@@ -63,7 +64,8 @@ jobs:
               acsSenderAddress="$ACS_SENDER_ADDRESS" \
               acsRecipientEmail="$MODERATION_NOTIFICATION_EMAIL" \
               apiProxySetArticleCountUrl="$API_PROXY_SET_ARTICLE_COUNT_URL" \
-              apiProxyArticleCountSyncSecret="$API_PROXY_ARTICLE_COUNT_SYNC_SECRET"
+              apiProxyArticleCountSyncSecret="$API_PROXY_ARTICLE_COUNT_SYNC_SECRET" \
+              apiProxySetMostViewedArticleUrl="$API_PROXY_SET_MOST_VIEWED_ARTICLE_URL"
 
           # Moderation__ModerationModelId/DailyModerationQuota/
           # AutoPublishMinScore/ModerationSystemPrompt are deliberately not

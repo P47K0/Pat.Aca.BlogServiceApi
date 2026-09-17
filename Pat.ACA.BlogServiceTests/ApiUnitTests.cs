@@ -322,6 +322,30 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task InMemoryArticleRepository_GetMostViewedArticleAsync_excludes_unlisted_articles_even_with_the_most_views()
+        {
+            // IncrementViewCountAsync doesn't exclude Unlisted articles (only
+            // future-publishedAt), so an unlisted article really can
+            // accumulate real views -- this proves GetMostViewedArticleAsync
+            // still never surfaces it, since it backs a homepage link that
+            // must only ever point at something publicly listed.
+            var repository = new InMemoryArticleRepository();
+            var request = new ArticleWriteRequest("unlisted-most-viewed", "Unlisted Popular", "Content.", "Summary.", DateTime.UtcNow.AddDays(-1), Unlisted: true);
+            await repository.CreateArticleAsync(request);
+
+            for (var i = 0; i < 1000; i++)
+            {
+                await repository.IncrementViewCountAsync("unlisted-most-viewed");
+            }
+
+            var mostViewed = await repository.GetMostViewedArticleAsync();
+
+            Assert.NotNull(mostViewed);
+            Assert.NotEqual("unlisted-most-viewed", mostViewed!.Slug);
+            Assert.True(mostViewed.ViewCount < 1000);
+        }
+
+        [Fact]
         public async Task InMemoryArticleRepository_CreateArticleAsync_returns_null_for_duplicate_slug()
         {
             var repository = new InMemoryArticleRepository();
