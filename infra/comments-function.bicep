@@ -88,6 +88,9 @@ param apiProxyArticleCountSyncSecret string = ''
 @description('api-proxy\'s internal most-viewed-article-sync endpoint (e.g. https://blog-api-proxy.pkoorevaar.workers.dev/internal/most-viewed-article) -- MostViewedSyncFunction POSTs the current most-viewed article here twice a day')
 param apiProxySetMostViewedArticleUrl string = ''
 
+@description('api-proxy\'s internal article-list-sync endpoint (e.g. https://blog-api-proxy.pkoorevaar.workers.dev/internal/article-list) -- ArticleListSyncFunction POSTs the recomputed latest-articles list here on every Articles Change Feed delivery, authenticated with the same apiProxyArticleCountSyncSecret above')
+param apiProxySetArticleListUrl string = ''
+
 var deploymentContainerName = 'app-package'
 
 // allowSharedKeyAccess: false -- identity-only access throughout (the
@@ -278,6 +281,10 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'ApiProxy__SetMostViewedArticleUrl'
           value: apiProxySetMostViewedArticleUrl
+        }
+        {
+          name: 'ApiProxy__SetArticleListUrl'
+          value: apiProxySetArticleListUrl
         }
       ]
     }

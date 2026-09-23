@@ -8,11 +8,15 @@ export interface Env {
    * `wrangler secret put ARTICLES_API_KEY` — never checked into wrangler.toml. */
   ARTICLES_API_KEY: string;
   /** Durable (not per-colo, unlike the Cache API below) fallback store —
-   * holds both the latest-10 article list snapshot and a per-slug snapshot
-   * of every individual article ever fetched; see the fallback sections
-   * below. Also holds the blog-post count under a third key (see "Article
-   * count" below) — same namespace, same "durable global store", just a
-   * different producer (ArticleCountSyncFunction, not this Worker itself). */
+   * holds both the latest-10 article list snapshot (written either by this
+   * Worker's own origin fetches, or by ArticleListSyncFunction's Change-Feed
+   * push, see "Article list sync" below) and a per-slug snapshot of every
+   * individual article ever fetched; see the fallback sections below. Also
+   * holds the blog-post count under a third key (see "Article count"
+   * below) and the most-viewed article under a fourth (see "Most-viewed
+   * article" below) — same namespace, same "durable global store", just
+   * different producers (ArticleCountSyncFunction/MostViewedSyncFunction/
+   * ArticleListSyncFunction, not always this Worker itself). */
   ARTICLES_FALLBACK: KVNamespace;
   /** Shared secret POST /internal/article-count requires as
    * X-Article-Count-Sync-Key. Set via
@@ -396,6 +400,74 @@ async function handleMostViewedArticleSync(request: Request, env: Env): Promise<
   return new Response(null, { status: 204 });
 }
 
+// --- Article list sync ---------------------------------------------------
+//
+// Backs the "Blog auto update: Cosmos DB Change Feed -> Azure Function ->
+// Worker/KV" backlog item: ArticleListSyncFunction reacts to every write on
+// the Articles container and pushes a freshly-recomputed latest-articles
+// list here, so the durable snapshot (see "Durable list fallback" above)
+// reflects a Cosmos write near-real-time instead of waiting on the next
+// request-driven revalidate (up to REVALIDATE_INTERVAL_MS stale) or cold-miss
+// to notice it. Writes into the exact same FALLBACK_KV_KEY snapshot the
+// list route's own SWR/fallback machinery reads from and writes to —
+// fresherFallbackResponse, readFallbackSnapshot, and every reader of that
+// key need no changes at all: this is just a second producer of a shape
+// that already exists, using the same writeFallbackSnapshotFromArticles
+// sort/cap/dedupe/writtenAt logic as the request-driven writer.
+//
+// Reuses the article-count sync's own shared secret (same reasoning as
+// most-viewed-article's sync) rather than a third one.
+const ARTICLE_LIST_SYNC_PATH = '/internal/article-list';
+
+/** Narrow, hand-rolled validation (same style as handleMostViewedArticleSync
+ * above) rather than a schema library — this Worker has no such dependency
+ * elsewhere, and the shape is small enough not to need one.
+ * `linkedinVideoEmbedUrl` is the one optional/nullable field, matching the
+ * Article interface's own `?: string | null`. `content` is deliberately not
+ * part of the wire payload at all — ArticleCountSyncFunction's sibling,
+ * ArticleListSyncFunction, never fetches article bodies from Cosmos for
+ * this sync (see its own doc comment), so it's filled in as '' here,
+ * matching what writeFallbackSnapshotFromArticles already blanks it to
+ * anyway. */
+function isValidSyncedArticle(candidate: unknown): candidate is Omit<Article, 'content'> {
+  const article = candidate as Record<string, unknown> | null;
+  return (
+    typeof article?.id === 'number' && Number.isInteger(article.id) &&
+    typeof article.slug === 'string' && article.slug.length > 0 &&
+    typeof article.title === 'string' &&
+    typeof article.summary === 'string' &&
+    typeof article.publishedAt === 'string' &&
+    Array.isArray(article.tags) && article.tags.every((tag) => typeof tag === 'string') &&
+    typeof article.viewCount === 'number' && Number.isInteger(article.viewCount) && article.viewCount >= 0 &&
+    (article.linkedinVideoEmbedUrl === undefined ||
+      article.linkedinVideoEmbedUrl === null ||
+      typeof article.linkedinVideoEmbedUrl === 'string')
+  );
+}
+
+async function handleArticleListSync(request: Request, env: Env): Promise<Response> {
+  const providedKey = request.headers.get(ARTICLE_COUNT_SYNC_KEY_HEADER);
+  if (!env.ARTICLE_COUNT_SYNC_SECRET || providedKey !== env.ARTICLE_COUNT_SYNC_SECRET) {
+    return new Response(null, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+
+  const candidateArticles = (body as { articles?: unknown } | null)?.articles;
+  if (!Array.isArray(candidateArticles) || !candidateArticles.every(isValidSyncedArticle)) {
+    return new Response(null, { status: 400 });
+  }
+
+  const articles: Article[] = candidateArticles.map((article) => ({ ...article, content: '' }));
+  await writeFallbackSnapshotFromArticles(env, articles);
+  return new Response(null, { status: 204 });
+}
+
 // --- Article markdown --------------------------------------------------
 //
 // GET /articles/{slug}.md and GET /about.md serve the raw Markdown `content`
@@ -540,8 +612,13 @@ function parseFallbackSnapshot(raw: string): FallbackSnapshot {
   return Array.isArray(parsed) ? { writtenAt: 0, articles: parsed as Article[] } : (parsed as FallbackSnapshot);
 }
 
-async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<void> {
-  const articles = (await listResponse.json()) as Article[];
+/** Shared by both writers of FALLBACK_KV_KEY: a successful origin list fetch
+ * (writeFallbackSnapshot below) and ArticleListSyncFunction's Change-Feed-
+ * driven push (handleArticleListSync, see "Article list sync" below) — same
+ * sort/cap/dedupe/writtenAt logic regardless of which one is calling, so the
+ * two producers can never disagree about what a "fresh enough to write"
+ * snapshot looks like. */
+async function writeFallbackSnapshotFromArticles(env: Env, articles: Article[]): Promise<void> {
   const latest = [...articles]
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
     .slice(0, FALLBACK_SIZE)
@@ -560,6 +637,11 @@ async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<
 
   const snapshot: FallbackSnapshot = { writtenAt: Date.now(), articles: latest };
   await env.ARTICLES_FALLBACK.put(FALLBACK_KV_KEY, JSON.stringify(snapshot));
+}
+
+async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<void> {
+  const articles = (await listResponse.json()) as Article[];
+  await writeFallbackSnapshotFromArticles(env, articles);
 }
 
 async function readFallbackSnapshot(env: Env): Promise<Response | null> {
@@ -897,6 +979,12 @@ export default {
     // server-to-server call.
     if (request.method === 'POST' && pathname === MOST_VIEWED_ARTICLE_SYNC_PATH) {
       return handleMostViewedArticleSync(request, env);
+    }
+
+    // Same internal-only reasoning as above -- ArticleListSyncFunction's
+    // own server-to-server call.
+    if (request.method === 'POST' && pathname === ARTICLE_LIST_SYNC_PATH) {
+      return handleArticleListSync(request, env);
     }
 
     // The one *public* non-GET route this Worker supports — everything
