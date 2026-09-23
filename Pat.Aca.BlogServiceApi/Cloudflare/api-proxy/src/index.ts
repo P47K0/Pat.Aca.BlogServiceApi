@@ -519,6 +519,27 @@ function articleContentEquals(a: Article, b: Article): boolean {
   );
 }
 
+/** Stored shape for FALLBACK_KV_KEY. `writtenAt` (this Worker's own clock,
+ * matching CACHED_AT_HEADER's epoch-ms convention) lets a reader on a
+ * different, stale-cached colo tell whether this durable snapshot -- global,
+ * unlike the per-colo Cache API entry above -- already reflects a fresher
+ * confirmed state than what it has locally, per fresherFallbackResponse
+ * below. */
+interface FallbackSnapshot {
+  writtenAt: number;
+  articles: Article[];
+}
+
+/** Parses a stored FALLBACK_KV_KEY value, tolerating the pre-writtenAt shape
+ * (a bare Article[]) that's still sitting in KV until this Worker's next
+ * successful write replaces it -- treated as maximally stale (writtenAt: 0)
+ * so fresherFallbackResponse never prefers it over a colo's own cache, while
+ * readFallbackSnapshot's genuine-fallback use still reads it unchanged. */
+function parseFallbackSnapshot(raw: string): FallbackSnapshot {
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? { writtenAt: 0, articles: parsed as Article[] } : (parsed as FallbackSnapshot);
+}
+
 async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<void> {
   const articles = (await listResponse.json()) as Article[];
   const latest = [...articles]
@@ -528,24 +549,62 @@ async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<
 
   const existing = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
   if (existing) {
-    const existingLatest = JSON.parse(existing) as Article[];
+    const existingSnapshot = parseFallbackSnapshot(existing);
     if (
-      latest.length === existingLatest.length &&
-      latest.every((article, i) => articleContentEquals(article, existingLatest[i]))
+      latest.length === existingSnapshot.articles.length &&
+      latest.every((article, i) => articleContentEquals(article, existingSnapshot.articles[i]))
     ) {
       return;
     }
   }
 
-  await env.ARTICLES_FALLBACK.put(FALLBACK_KV_KEY, JSON.stringify(latest));
+  const snapshot: FallbackSnapshot = { writtenAt: Date.now(), articles: latest };
+  await env.ARTICLES_FALLBACK.put(FALLBACK_KV_KEY, JSON.stringify(snapshot));
 }
 
 async function readFallbackSnapshot(env: Env): Promise<Response | null> {
   const stored = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
   if (!stored) return null;
-  return new Response(stored, {
+  const snapshot = parseFallbackSnapshot(stored);
+  return new Response(JSON.stringify(snapshot.articles), {
     status: 200,
     headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+  });
+}
+
+/** Addresses the "api-proxy cache can serve a very stale article list"
+ * backlog item (filed 2026-09-06): a colo's own per-colo Cache API entry only
+ * ever gets rechecked against origin when a request actually lands on it past
+ * REVALIDATE_INTERVAL_MS -- a colo nobody hits just sits stale indefinitely,
+ * with nothing proactively refreshing it. This durable snapshot, by contrast,
+ * gets refreshed (see writeFallbackSnapshot) by *any* colo's successful
+ * revalidate or cold-miss fetch, so at real traffic levels it's almost always
+ * fresher than one specific idle colo's own copy.
+ *
+ * Called only once a cache hit is already past REVALIDATE_INTERVAL_MS -- i.e.
+ * exactly the case that used to just serve the (possibly long-)stale
+ * per-colo copy while kicking a background revalidate for next time. If the
+ * durable snapshot is newer than this colo's own cached-at, serve it instead,
+ * immediately, rather than making this one request eat the full staleness gap
+ * that accumulated while this colo had no traffic. Returns null (falls
+ * through to the previous behavior) when there's nothing newer to offer --
+ * cheap either way: one extra KV read, not a write. Content-blanked, same as
+ * every other use of this snapshot -- accepted already since the list view
+ * never needs it (see the "Durable list fallback" section above). */
+async function fresherFallbackResponse(env: Env, cachedAt: number): Promise<Response | null> {
+  const stored = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
+  if (!stored) return null;
+
+  const snapshot = parseFallbackSnapshot(stored);
+  if (snapshot.writtenAt <= cachedAt) return null;
+
+  return new Response(JSON.stringify(snapshot.articles), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      [CACHED_AT_HEADER]: String(snapshot.writtenAt),
+      ...CORS_HEADERS,
+    },
   });
 }
 
@@ -711,7 +770,13 @@ async function fetchDetailWithFallback(
  * (`/articles?limit=&after=`, infinite scroll's "load more") gets its own
  * cache entry via the query-string-aware cache key, but no durable fallback —
  * it's progressive enhancement on top of an already-rendered page, not the
- * critical first paint the fallback exists to protect. */
+ * critical first paint the fallback exists to protect.
+ *
+ * For the plain list route specifically, a past-interval hit first checks
+ * fresherFallbackResponse before falling back to serving its own stale copy —
+ * see that function's doc comment for why (the "stale article list" backlog
+ * item: a background revalidate alone only helps colos that actually receive
+ * traffic). */
 async function proxyArticlesRequest(
   env: Env,
   ctx: ExecutionContext,
@@ -720,17 +785,26 @@ async function proxyArticlesRequest(
   requestUrl: string,
 ): Promise<Response> {
   const key = cacheKeyFor(pathname, search, requestUrl);
+  const isPlainList = pathname === LIST_PATH && search === '';
 
   const cached = await cache.match(key);
   if (cached) {
     const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
     if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
+      if (isPlainList) {
+        const fresher = await fresherFallbackResponse(env, cachedAt);
+        if (fresher) {
+          ctx.waitUntil(cache.put(key, fresher.clone()));
+          ctx.waitUntil(revalidate(env, pathname, search, key));
+          return fresher;
+        }
+      }
       ctx.waitUntil(revalidate(env, pathname, search, key));
     }
     return cached;
   }
 
-  if (pathname === LIST_PATH && search === '') {
+  if (isPlainList) {
     return fetchListWithFallback(env, ctx, key);
   }
 
