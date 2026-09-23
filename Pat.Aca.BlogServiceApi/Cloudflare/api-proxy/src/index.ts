@@ -497,12 +497,46 @@ const FALLBACK_KV_KEY = 'latest-10';
 const FALLBACK_SIZE = 10;
 const ORIGIN_TIMEOUT_MS = 2000;
 
+/** True when two articles are identical apart from `viewCount` -- which the
+ * origin bumps on every fetch by design (see this file's top-of-file SWR
+ * comment on the accepted undercount), so it alone would make every
+ * revalidate look like a content change even when nothing a reader would
+ * notice actually changed. Lets the write functions below skip a KV write --
+ * eventually-consistent, per-write-limited, and offering no freshness benefit
+ * when the stored bytes wouldn't change anyway -- for the common case where a
+ * background revalidate just re-confirms already-cached content. */
+function articleContentEquals(a: Article, b: Article): boolean {
+  return (
+    a.id === b.id &&
+    a.slug === b.slug &&
+    a.title === b.title &&
+    a.summary === b.summary &&
+    a.content === b.content &&
+    a.publishedAt === b.publishedAt &&
+    a.linkedinVideoEmbedUrl === b.linkedinVideoEmbedUrl &&
+    a.tags.length === b.tags.length &&
+    a.tags.every((tag, i) => tag === b.tags[i])
+  );
+}
+
 async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<void> {
   const articles = (await listResponse.json()) as Article[];
   const latest = [...articles]
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
     .slice(0, FALLBACK_SIZE)
     .map((article) => ({ ...article, content: '' }));
+
+  const existing = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
+  if (existing) {
+    const existingLatest = JSON.parse(existing) as Article[];
+    if (
+      latest.length === existingLatest.length &&
+      latest.every((article, i) => articleContentEquals(article, existingLatest[i]))
+    ) {
+      return;
+    }
+  }
+
   await env.ARTICLES_FALLBACK.put(FALLBACK_KV_KEY, JSON.stringify(latest));
 }
 
@@ -583,15 +617,18 @@ async function fetchListWithFallback(
 // the production incident that motivated it). Key differences from the list
 // snapshot: every article gets its own KV entry — no cap, no cutoff to pick,
 // since (unlike the list) there's no natural "latest N" that covers the
-// actual failure mode — written on every successful origin fetch, whether a
-// cold-miss or a background revalidate; and the full rendered `content` is
-// kept, not blanked, since that's the entire point of this route. Reuses the
-// same ARTICLES_FALLBACK namespace as the list snapshot rather than
-// provisioning a second KV namespace for what's the same fallback purpose —
-// a `article:{slug}` key prefix keeps the two from ever colliding. Storage
-// stays tiny at this blog's scale (one entry per article ever fetched, a few
-// KB each); write volume is bounded by real traffic — at most once per
-// REVALIDATE_INTERVAL_MS per colo per article, not per page view.
+// actual failure mode — written on every successful origin fetch (cold-miss
+// or background revalidate) whose content actually differs from what's
+// already stored (see articleContentEquals — `viewCount` alone, which the
+// origin bumps on every fetch, doesn't count as a change); and the full
+// rendered `content` is kept, not blanked, since that's the entire point of
+// this route. Reuses the same ARTICLES_FALLBACK namespace as the list
+// snapshot rather than provisioning a second KV namespace for what's the
+// same fallback purpose — a `article:{slug}` key prefix keeps the two from
+// ever colliding. Storage stays tiny at this blog's scale (one entry per
+// article ever fetched, a few KB each); write volume is bounded by real
+// content changes, not by traffic — a background revalidate that re-fetches
+// unchanged content (the common case) costs one extra KV read, not a write.
 function detailFallbackKey(slug: string): string {
   return `article:${slug}`;
 }
@@ -604,7 +641,13 @@ function extractSlug(pathname: string): string {
 }
 
 async function writeDetailFallbackSnapshot(env: Env, slug: string, articleResponse: Response): Promise<void> {
-  const article = await articleResponse.json();
+  const article = (await articleResponse.json()) as Article;
+
+  const existing = await env.ARTICLES_FALLBACK.get(detailFallbackKey(slug));
+  if (existing && articleContentEquals(JSON.parse(existing) as Article, article)) {
+    return;
+  }
+
   await env.ARTICLES_FALLBACK.put(detailFallbackKey(slug), JSON.stringify(article));
 }
 
