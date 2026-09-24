@@ -10,9 +10,11 @@ import { detectFlagReason, logConversation } from './lib/conversation-log';
 import { withCors, handlePreflight } from './lib/cors';
 import { bumpContentVersion } from './lib/cache-invalidation';
 import { getEmbeddingsCount } from './lib/embeddings-count';
+import { addRecentAnswerIfReal, getRecentAnswers } from './lib/recent-answers';
 
 const CACHE_INVALIDATION_KEY_HEADER = 'X-Cache-Invalidation-Key';
 const EMBEDDINGS_COUNT_KEY_HEADER = 'X-Embeddings-Count-Key';
+const RECENT_ANSWERS_KEY_HEADER = 'X-Recent-Answers-Key';
 const SEARCH_KEY_HEADER = 'X-Search-Key';
 // Set by ui-worker on its server-to-server call -- the real visitor IP, not
 // this Worker's own CF-Connecting-IP (which here would just be ui-worker's
@@ -87,6 +89,16 @@ async function handleAsk(request: Request, env: Env, ctx: ExecutionContext, clie
 
   const answer = await generateAnswer(env.AI, question, chunks);
 
+  // Fire-and-forget, same as the conversation-logging waitUntil below --
+  // feeds the public fact box's rolling buffer (recent-answers.ts) whenever
+  // this answer is real and grounded, independent of allowLogging (an
+  // answer alone is never visitor data, see that module's own comment).
+  ctx.waitUntil(
+    addRecentAnswerIfReal(env.ASSISTANT_CACHE, answer, chunks).catch((error) =>
+      console.error('Recent-answers buffer update failed:', error),
+    ),
+  );
+
   // Not stored by default -- allowLogging is the future chat widget's own
   // opt-in toggle (disclosed plainly next to it, Phase 7 concern, not
   // plumbed anywhere yet) -- except a flagged input is logged regardless,
@@ -145,6 +157,22 @@ async function handleEmbeddingsCount(request: Request, env: Env): Promise<Respon
 
   const count = await getEmbeddingsCount(env);
   return Response.json({ count });
+}
+
+/** GET /internal/recent-answers — backs the site's AI-assistant fact box.
+ * Same internal-only shape as /internal/embeddings-count (secret-gated,
+ * fails closed if unconfigured, called by a Worker behind the site rather
+ * than a browser directly): a plain KV read via recent-answers.ts, no
+ * generation involved, satisfying the box's own "must come from a cache,
+ * never an LLM call" requirement by construction. */
+async function handleRecentAnswers(request: Request, env: Env): Promise<Response> {
+  const providedKey = request.headers.get(RECENT_ANSWERS_KEY_HEADER);
+  if (!env.RECENT_ANSWERS_SECRET || providedKey !== env.RECENT_ANSWERS_SECRET) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  const answers = await getRecentAnswers(env.ASSISTANT_CACHE);
+  return Response.json({ answers });
 }
 
 /** GET /search — blog search, reusing the KnowledgeBase embeddings already
@@ -222,6 +250,10 @@ export default {
 
     if (url.pathname === '/internal/embeddings-count' && request.method === 'GET') {
       return handleEmbeddingsCount(request, env);
+    }
+
+    if (url.pathname === '/internal/recent-answers' && request.method === 'GET') {
+      return handleRecentAnswers(request, env);
     }
 
     if (url.pathname === '/search' && request.method === 'GET') {

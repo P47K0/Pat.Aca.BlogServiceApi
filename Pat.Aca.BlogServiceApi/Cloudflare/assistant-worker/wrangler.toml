@@ -59,6 +59,11 @@ ALLOWED_ORIGIN = "https://www.koorevaar.com"
 # widget or a browser directly. Same off-wrangler.toml Secret treatment as
 # everything else in this section.
 
+# RECENT_ANSWERS_SECRET: checked on GET /internal/recent-answers, called by
+# a Worker behind the site's AI-assistant fact box, never the chat widget or
+# a browser directly. Same off-wrangler.toml Secret treatment as everything
+# else in this section.
+
 # SEARCH_SECRET: checked on GET /search, called by ui-worker's own SSR route
 # handler for the blog search box (server-to-server, never a browser
 # directly). Same off-wrangler.toml Secret treatment as everything else in

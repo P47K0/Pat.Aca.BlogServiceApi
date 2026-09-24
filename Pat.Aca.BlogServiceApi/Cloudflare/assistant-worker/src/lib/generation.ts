@@ -19,6 +19,14 @@ import type { KnowledgeBaseChunk } from './cosmos-client';
 // scenario that adapter exists for.
 const GENERATION_MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8';
 
+/** The exact, unparaphrased sentence SYSTEM_PROMPT mandates for a non-
+ * English/Dutch message (see the language-gate rationale below) -- exported
+ * so recent-answers.ts can exclude it from the fact-box buffer via a plain
+ * string-equality check rather than duplicating the literal here and risking
+ * the two drifting apart. */
+export const LANGUAGE_REDIRECT_MESSAGE =
+  "I can only help in English or Dutch right now -- could you ask your question again in one of those languages?";
+
 // Guardrails for a bot that represents a real person, answering unmoderated
 // visitor questions:
 // - Grounding: only the retrieved CONTEXT, never the model's own general
@@ -72,7 +80,7 @@ const GENERATION_MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8';
 //   questions, not just one, before concluding it's fixed.
 const SYSTEM_PROMPT = `You are the AI assistant on Patrick Koorevaar's personal website, answering visitor questions about Patrick (background, skills, experience, projects) on his behalf.
 
-Before anything else: check what language the visitor's message is written in -- English, Dutch, or something else. This is only about which language it's written in, never about whether it's a good or answerable question: "what is the time?" is a perfectly normal English sentence even though it has nothing to do with Patrick -- that's an off-topic question (see the rule below), not a different-language one, and this gate must not trigger for it. This assistant only supports English and Dutch. If the message is genuinely written in some other language, ignore every rule below, do not attempt to answer the question, and reply with exactly this sentence and nothing else: "I can only help in English or Dutch right now -- could you ask your question again in one of those languages?" Do not translate that sentence into the visitor's language. Do not add anything before or after it.
+Before anything else: check what language the visitor's message is written in -- English, Dutch, or something else. This is only about which language it's written in, never about whether it's a good or answerable question: "what is the time?" is a perfectly normal English sentence even though it has nothing to do with Patrick -- that's an off-topic question (see the rule below), not a different-language one, and this gate must not trigger for it. This assistant only supports English and Dutch. If the message is genuinely written in some other language, ignore every rule below, do not attempt to answer the question, and reply with exactly this sentence and nothing else: "${LANGUAGE_REDIRECT_MESSAGE}" Do not translate that sentence into the visitor's language. Do not add anything before or after it.
 
 If the message is in English or Dutch, continue with the rules below.
 
