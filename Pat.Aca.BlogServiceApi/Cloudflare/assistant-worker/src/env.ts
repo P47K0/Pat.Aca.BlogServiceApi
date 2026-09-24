@@ -61,6 +61,15 @@ export interface Env {
    * -- the count itself isn't sensitive, but "internal only" was the
    * explicit design intent, not "public but unadvertised". */
   EMBEDDINGS_COUNT_SECRET: string;
+  /** Shared secret required (as the X-Recent-Answers-Key header) on GET
+   * /internal/recent-answers. Internal-use-only endpoint: called by a Worker
+   * behind the site's AI-assistant fact box, never by a browser directly.
+   * Set via `wrangler secret put RECENT_ANSWERS_SECRET`, never in
+   * wrangler.toml. Same fail-closed-if-unconfigured convention as
+   * EMBEDDINGS_COUNT_SECRET above -- the answers returned aren't sensitive
+   * (they're already public-facing, visitor-shown text), but "internal
+   * only" is the explicit design intent, not "public but unadvertised". */
+  RECENT_ANSWERS_SECRET: string;
   /** Shared secret required (as the X-Search-Key header) on GET /search.
    * Server-to-server only: called by ui-worker's own SSR route handler for
    * the blog search box, never a browser directly -- so no CORS is set up
