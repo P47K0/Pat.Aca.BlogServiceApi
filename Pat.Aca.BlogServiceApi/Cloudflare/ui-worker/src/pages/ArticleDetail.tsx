@@ -87,6 +87,14 @@ export const ArticleDetailPage: FC<{
         class="prose prose-neutral mt-8 max-w-none"
         dangerouslySetInnerHTML={{ __html: article.content }}
       />
+      {/* Same trusted, api-proxy-rendered HTML as `content`, set apart from
+          the body by a rule and smaller, muted text. */}
+      {article.footer && (
+        <div
+          class="prose prose-sm prose-neutral mt-8 max-w-none border-t border-gray-200 pt-4 text-gray-500"
+          dangerouslySetInnerHTML={{ __html: article.footer }}
+        />
+      )}
       {/* Shared lightbox for every image in the content above. Native
           <popover> handles open/close/light-dismiss/Escape for free, same
           as TagCloud's "Show all tags" popover — the only bit that can't be

@@ -79,6 +79,10 @@ export interface Article {
   /** Authored search keywords, distinct from `tags`; null/undefined means
    * no <meta name="keywords"> and `tags` for JSON-LD keywords. */
   seoKeywords?: string[] | null;
+  /** HTML for the block below the article body: api-proxy's shared
+   * ARTICLE_FOOTER, rendered like `content`. null/undefined for unlisted
+   * articles. */
+  footer?: string | null;
 }
 
 /** Thrown when api-proxy returns a non-2xx/404 status or the fetch itself

@@ -132,7 +132,19 @@ interface Article {
   coverImageUrl?: string | null;
   seoDescription?: string | null;
   seoKeywords?: string[] | null;
+  /** Hides the article from lists; also means it gets no ARTICLE_FOOTER
+   * (e.g. the `about` CV document the AI assistant reads). */
+  unlisted?: boolean;
+  /** Not stored by the API: set here to the rendered ARTICLE_FOOTER for
+   * listed articles, so ui-worker has one place to take it from. */
+  footer?: string | null;
 }
+
+/** The one footer shown under every listed article, in Markdown. It lives
+ * here rather than in each article's `content`, where it would be embedded
+ * into the KnowledgeBase as its own chunk on every article. Text specific
+ * to one article belongs at the end of that article's `content`. */
+const ARTICLE_FOOTER = '*Co-authored with Claude.*';
 
 /** Every article's Markdown source conventionally opens with a `# Title`
  * line mirroring `article.title` — but ArticleDetailPage (ui-worker) already
@@ -167,6 +179,7 @@ function renderArticleContent(article: Article): Article {
       marked.parse(article.content, { async: false }) as string,
       article.title,
     ),
+    footer: article.unlisted ? null : (marked.parse(ARTICLE_FOOTER, { async: false }) as string),
   };
 }
 
@@ -524,7 +537,10 @@ async function fetchArticleMarkdown(env: Env, slug: string): Promise<Response> {
   const article = (await upstreamResponse.json()) as Article;
   headers.set('Content-Type', 'text/markdown; charset=utf-8');
   headers.set(CACHED_AT_HEADER, String(Date.now()));
-  return new Response(article.content, { status: 200, headers });
+  // Under a thematic break, the shape the byline had when it still lived
+  // inside `content`.
+  const markdown = article.unlisted ? article.content : `${article.content.trimEnd()}\n\n---\n\n${ARTICLE_FOOTER}\n`;
+  return new Response(markdown, { status: 200, headers });
 }
 
 async function proxyArticleMarkdownRequest(
@@ -595,6 +611,7 @@ function articleContentEquals(a: Article, b: Article): boolean {
     a.title === b.title &&
     a.summary === b.summary &&
     a.content === b.content &&
+    a.footer === b.footer &&
     a.publishedAt === b.publishedAt &&
     a.linkedinVideoEmbedUrl === b.linkedinVideoEmbedUrl &&
     a.coverImageUrl === b.coverImageUrl &&
