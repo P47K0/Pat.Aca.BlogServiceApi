@@ -504,6 +504,28 @@ namespace Pat.ACA.BlogServiceTests
             Assert.Contains(errors, error => error.StartsWith("seoKeywords"));
         }
 
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        public void ArticleWriteValidation_fails_for_a_blank_footer(string footer)
+        {
+            var request = new ArticleWriteRequest("slug", "Title", "Content.", Footer: footer);
+
+            var errors = ArticleWriteValidation.Validate(request);
+
+            Assert.Contains("footer must be non-empty when present.", errors);
+        }
+
+        [Fact]
+        public void ArticleWriteValidation_passes_for_a_markdown_footer()
+        {
+            var request = new ArticleWriteRequest("slug", "Title", "Content.", Footer: "*Co-authored with Claude.*");
+
+            var errors = ArticleWriteValidation.Validate(request);
+
+            Assert.Empty(errors);
+        }
+
         // --- CommentWriteValidation ---
 
         private static readonly CommentSettings DefaultCommentSettings = new();

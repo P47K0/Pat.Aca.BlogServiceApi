@@ -50,5 +50,10 @@ namespace Pat.Aca.BlogServiceApi
         // Curated search keywords, distinct from Tags (Tags stay the site's
         // navigation taxonomy). Rendered as <meta name="keywords"> and the
         // JSON-LD keywords when present, falling back to Tags for JSON-LD.
-        List<string>? SeoKeywords = null);
+        List<string>? SeoKeywords = null,
+        // Markdown rendered below the article body as a visually separate
+        // block (e.g. the "Co-authored with Claude." byline), rather than
+        // appended to Content. Kept out of Content so it isn't embedded as
+        // its own KnowledgeBase chunk on every article. Null for none.
+        string? Footer = null);
 }

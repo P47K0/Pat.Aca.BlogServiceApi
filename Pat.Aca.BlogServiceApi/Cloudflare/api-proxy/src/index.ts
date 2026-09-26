@@ -132,6 +132,11 @@ interface Article {
   coverImageUrl?: string | null;
   seoDescription?: string | null;
   seoKeywords?: string[] | null;
+  /** Raw Markdown for the block shown below the article body (e.g. the
+   * "Co-authored with Claude." byline), rendered to HTML the same way as
+   * `content`. Kept separate from `content` so it isn't embedded into the
+   * KnowledgeBase as its own chunk on every article. */
+  footer?: string | null;
 }
 
 /** Every article's Markdown source conventionally opens with a `# Title`
@@ -167,6 +172,7 @@ function renderArticleContent(article: Article): Article {
       marked.parse(article.content, { async: false }) as string,
       article.title,
     ),
+    ...(article.footer ? { footer: marked.parse(article.footer, { async: false }) as string } : {}),
   };
 }
 
@@ -524,7 +530,11 @@ async function fetchArticleMarkdown(env: Env, slug: string): Promise<Response> {
   const article = (await upstreamResponse.json()) as Article;
   headers.set('Content-Type', 'text/markdown; charset=utf-8');
   headers.set(CACHED_AT_HEADER, String(Date.now()));
-  return new Response(article.content, { status: 200, headers });
+  // The footer is appended under a thematic break, the same shape the
+  // byline had when it still lived inside `content`, so the Markdown view
+  // keeps showing it.
+  const markdown = article.footer ? `${article.content.trimEnd()}\n\n---\n\n${article.footer}\n` : article.content;
+  return new Response(markdown, { status: 200, headers });
 }
 
 async function proxyArticleMarkdownRequest(
@@ -595,6 +605,7 @@ function articleContentEquals(a: Article, b: Article): boolean {
     a.title === b.title &&
     a.summary === b.summary &&
     a.content === b.content &&
+    a.footer === b.footer &&
     a.publishedAt === b.publishedAt &&
     a.linkedinVideoEmbedUrl === b.linkedinVideoEmbedUrl &&
     a.coverImageUrl === b.coverImageUrl &&

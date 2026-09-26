@@ -190,6 +190,25 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task PUT_articles_slug_persists_and_clears_footer()
+        {
+            var client = CreateClient("Articles.Write");
+            await client.PostAsJsonAsync("/articles", ValidRequest("footer-added-later"));
+
+            using var withFooter = await client.PutAsJsonAsync(
+                "/articles/footer-added-later",
+                ValidRequest("footer-added-later") with { Footer = "*Co-authored with Claude.*" });
+            var updated = await withFooter.Content.ReadFromJsonAsync<Article>();
+            Assert.Equal("*Co-authored with Claude.*", updated!.Footer);
+
+            // PUT is a full-record update: omitting footer clears it.
+            using var withoutFooter = await client.PutAsJsonAsync(
+                "/articles/footer-added-later", ValidRequest("footer-added-later"));
+            var cleared = await withoutFooter.Content.ReadFromJsonAsync<Article>();
+            Assert.Null(cleared!.Footer);
+        }
+
+        [Fact]
         public async Task POST_articles_returns_400_for_a_non_https_cover_image_url()
         {
             var client = CreateClient("Articles.Write");
