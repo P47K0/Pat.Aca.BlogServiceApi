@@ -130,6 +130,8 @@ interface Article {
   viewCount: number;
   linkedinVideoEmbedUrl?: string | null;
   coverImageUrl?: string | null;
+  seoDescription?: string | null;
+  seoKeywords?: string[] | null;
 }
 
 /** Every article's Markdown source conventionally opens with a `# Title`
@@ -596,6 +598,8 @@ function articleContentEquals(a: Article, b: Article): boolean {
     a.publishedAt === b.publishedAt &&
     a.linkedinVideoEmbedUrl === b.linkedinVideoEmbedUrl &&
     a.coverImageUrl === b.coverImageUrl &&
+    a.seoDescription === b.seoDescription &&
+    (a.seoKeywords ?? []).join('\n') === (b.seoKeywords ?? []).join('\n') &&
     a.tags.length === b.tags.length &&
     a.tags.every((tag, i) => tag === b.tags[i])
   );

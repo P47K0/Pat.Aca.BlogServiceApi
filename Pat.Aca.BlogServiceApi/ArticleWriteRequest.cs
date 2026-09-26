@@ -29,5 +29,9 @@ namespace Pat.Aca.BlogServiceApi
         bool Unlisted = false,
         // Optional, but when present must be an absolute https URL (see
         // ArticleWriteValidation). See Article.CoverImageUrl.
-        string? CoverImageUrl = null);
+        string? CoverImageUrl = null,
+        // Optional, validated when present (see ArticleWriteValidation).
+        // See Article.SeoDescription/SeoKeywords.
+        string? SeoDescription = null,
+        List<string>? SeoKeywords = null);
 }

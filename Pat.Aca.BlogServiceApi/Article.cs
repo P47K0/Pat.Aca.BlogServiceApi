@@ -41,5 +41,14 @@ namespace Pat.Aca.BlogServiceApi
         // an article without one. Used for og:image/twitter:image and the
         // homepage's most-viewed thumbnail; both simply omit the image
         // when this is null.
-        string? CoverImageUrl = null);
+        string? CoverImageUrl = null,
+        // Search-snippet description, written distinctly from Summary
+        // (Summary stays the human-facing card blurb). Rendered as the
+        // meta/og/twitter description when present, falling back to
+        // Summary when null. Max 160 characters (see ArticleWriteValidation).
+        string? SeoDescription = null,
+        // Curated search keywords, distinct from Tags (Tags stay the site's
+        // navigation taxonomy). Rendered as <meta name="keywords"> and the
+        // JSON-LD keywords when present, falling back to Tags for JSON-LD.
+        List<string>? SeoKeywords = null);
 }

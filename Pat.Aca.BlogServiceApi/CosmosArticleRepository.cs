@@ -408,7 +408,9 @@ namespace Pat.Aca.BlogServiceApi
                 SeriesOrder = request.SeriesOrder,
                 RelatedSlugs = request.RelatedSlugs,
                 Unlisted = request.Unlisted,
-                CoverImageUrl = request.CoverImageUrl
+                CoverImageUrl = request.CoverImageUrl,
+                SeoDescription = request.SeoDescription,
+                SeoKeywords = request.SeoKeywords
             };
 
             ItemResponse<ArticleDocument> response = await _container.CreateItemAsync(document, new PartitionKey(document.Slug));
@@ -447,7 +449,9 @@ namespace Pat.Aca.BlogServiceApi
                 PatchOperation.Set("/seriesOrder", request.SeriesOrder),
                 PatchOperation.Set("/relatedSlugs", request.RelatedSlugs),
                 PatchOperation.Set("/unlisted", request.Unlisted),
-                PatchOperation.Set("/coverImageUrl", request.CoverImageUrl)
+                PatchOperation.Set("/coverImageUrl", request.CoverImageUrl),
+                PatchOperation.Set("/seoDescription", request.SeoDescription),
+                PatchOperation.Set("/seoKeywords", request.SeoKeywords)
             };
 
             TransactionalBatch batch = _container.CreateTransactionalBatch(new PartitionKey(slug));
@@ -479,7 +483,7 @@ namespace Pat.Aca.BlogServiceApi
             // Existing hand-authored articles keep their old (PascalCase-stored)
             // Id value untouched; it's simply never read or written by this
             // class's write methods.
-            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl, document.SeriesName, document.SeriesOrder, document.RelatedSlugs, document.Unlisted, document.CoverImageUrl);
+            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl, document.SeriesName, document.SeriesOrder, document.RelatedSlugs, document.Unlisted, document.CoverImageUrl, document.SeoDescription, document.SeoKeywords);
 
         /// <summary>
         /// The exact JSON shape written to/read from Cosmos by every method in
@@ -548,6 +552,12 @@ namespace Pat.Aca.BlogServiceApi
 
             [JsonProperty("coverImageUrl")]
             public string? CoverImageUrl { get; set; }
+
+            [JsonProperty("seoDescription")]
+            public string? SeoDescription { get; set; }
+
+            [JsonProperty("seoKeywords")]
+            public List<string>? SeoKeywords { get; set; }
         }
 
         public async Task<List<ArticleSummary>> GetRecentArticlesAsync(int count = 5)

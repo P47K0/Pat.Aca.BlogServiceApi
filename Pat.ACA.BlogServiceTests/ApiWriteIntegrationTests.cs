@@ -170,6 +170,26 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task PUT_articles_slug_persists_seo_description_and_keywords()
+        {
+            var client = CreateClient("Articles.Write");
+            await client.PostAsJsonAsync("/articles", ValidRequest("seo-fields-added-later"));
+
+            using var response = await client.PutAsJsonAsync(
+                "/articles/seo-fields-added-later",
+                ValidRequest("seo-fields-added-later") with
+                {
+                    SeoDescription = "A search-snippet description.",
+                    SeoKeywords = new List<string> { "cosmos db", "azure functions" }
+                });
+
+            var updated = await response.Content.ReadFromJsonAsync<Article>();
+            Assert.NotNull(updated);
+            Assert.Equal("A search-snippet description.", updated!.SeoDescription);
+            Assert.Equal(new[] { "cosmos db", "azure functions" }, updated.SeoKeywords);
+        }
+
+        [Fact]
         public async Task POST_articles_returns_400_for_a_non_https_cover_image_url()
         {
             var client = CreateClient("Articles.Write");

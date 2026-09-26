@@ -7,7 +7,7 @@ import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles
 import { searchAssistant, resolveSearchResults } from './lib/search-client';
 import { verifyTurnstile } from './lib/turnstile';
 import { escapeXml } from './lib/xml';
-import { Layout } from './components/Layout';
+import { Layout, SITE_AUTHOR } from './components/Layout';
 import { ArticlesFragment } from './components/ArticlesFragment';
 import { HomePage, LOAD_MORE_PAGE_SIZE } from './pages/Home';
 import { TagPage } from './pages/TagPage';
@@ -171,24 +171,29 @@ app.get('/articles/:slug', async (c) => {
   }
 
   const canonicalUrl = `${c.env.SITE_URL}/articles/${article.slug}`;
+  // Authored SEO fields win when present; articles without them fall back
+  // to the derived summary/tags exactly as before.
+  const seoDescription = article.seoDescription || article.summary;
+  const seoKeywords = article.seoKeywords?.length ? article.seoKeywords : article.tags;
   return c.html(
     <Layout
       title={article.title}
-      description={article.summary}
+      description={seoDescription}
       canonicalUrl={canonicalUrl}
       type="article"
       publishedAt={article.publishedAt}
       tags={article.tags}
       imageUrl={article.coverImageUrl}
+      keywords={article.seoKeywords}
       jsonLd={{
         '@context': 'https://schema.org',
         '@type': 'BlogPosting',
         headline: article.title,
-        description: article.summary,
+        description: seoDescription,
         datePublished: article.publishedAt,
         url: canonicalUrl,
-        keywords: article.tags.join(', '),
-        author: { '@type': 'Person', name: 'Patrick Koorevaar' },
+        keywords: seoKeywords.join(', '),
+        author: { '@type': 'Person', name: SITE_AUTHOR.name, url: SITE_AUTHOR.url },
         ...(article.coverImageUrl ? { image: article.coverImageUrl } : {}),
       }}
     >
