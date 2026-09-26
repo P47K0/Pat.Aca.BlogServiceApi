@@ -28,7 +28,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         public async Task<MostViewedArticleResult?> GetMostViewedArticleAsync(CancellationToken cancellationToken = default)
         {
             var query = new QueryDefinition(
-                "SELECT TOP 1 c.slug, c.title, c.summary, c.viewCount FROM c " +
+                "SELECT TOP 1 c.slug, c.title, c.summary, c.viewCount, c.coverImageUrl FROM c " +
                 "WHERE c.publishedAt <= @now AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false) " +
                 "ORDER BY c.viewCount DESC")
                 .WithParameter("@now", DateTime.UtcNow);
@@ -42,7 +42,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                 var top = response.Resource.FirstOrDefault();
                 if (top is not null)
                 {
-                    return new MostViewedArticleResult(top.Slug, top.Title, top.Summary, top.ViewCount);
+                    return new MostViewedArticleResult(top.Slug, top.Title, top.Summary, top.ViewCount, top.CoverImageUrl);
                 }
             }
 
@@ -62,6 +62,9 @@ namespace Pat.Aca.BlogCommentsModerationFunction
 
             [JsonProperty("viewCount")]
             public int ViewCount { get; set; }
+
+            [JsonProperty("coverImageUrl")]
+            public string? CoverImageUrl { get; set; }
         }
     }
 }

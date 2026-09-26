@@ -6,5 +6,5 @@ namespace Pat.Aca.BlogServiceApi
     /// full Article. Same "don't pay for the full payload" reasoning as
     /// GetArticleCountAsync.
     /// </summary>
-    public sealed record MostViewedArticle(string Slug, string Title, string Summary, int ViewCount);
+    public sealed record MostViewedArticle(string Slug, string Title, string Summary, int ViewCount, string? CoverImageUrl = null);
 }

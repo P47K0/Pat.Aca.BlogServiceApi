@@ -29,6 +29,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                         title = article.Title,
                         summary = article.Summary,
                         viewCount = article.ViewCount,
+                        coverImageUrl = article.CoverImageUrl,
                     })
                 };
                 request.Headers.Add(SyncKeyHeaderName, settings.ArticleCountSyncSecret);

@@ -129,6 +129,7 @@ interface Article {
   tags: string[];
   viewCount: number;
   linkedinVideoEmbedUrl?: string | null;
+  coverImageUrl?: string | null;
 }
 
 /** Every article's Markdown source conventionally opens with a `# Title`
@@ -377,12 +378,19 @@ async function handleMostViewedArticleSync(request: Request, env: Env): Promise<
     return new Response(null, { status: 400 });
   }
 
-  const candidate = body as { slug?: unknown; title?: unknown; summary?: unknown; viewCount?: unknown } | null;
+  const candidate = body as {
+    slug?: unknown; title?: unknown; summary?: unknown; viewCount?: unknown; coverImageUrl?: unknown;
+  } | null;
   if (
     typeof candidate?.slug !== 'string' || !candidate.slug ||
     typeof candidate.title !== 'string' || !candidate.title ||
     typeof candidate.summary !== 'string' ||
-    typeof candidate.viewCount !== 'number' || !Number.isInteger(candidate.viewCount) || candidate.viewCount < 0
+    typeof candidate.viewCount !== 'number' || !Number.isInteger(candidate.viewCount) || candidate.viewCount < 0 ||
+    // Optional/nullable, like linkedinVideoEmbedUrl in the article list
+    // sync. Already validated as an absolute https URL on the API's write
+    // path, so only the type is re-checked here.
+    (candidate.coverImageUrl !== undefined && candidate.coverImageUrl !== null &&
+      typeof candidate.coverImageUrl !== 'string')
   ) {
     return new Response(null, { status: 400 });
   }
@@ -394,6 +402,7 @@ async function handleMostViewedArticleSync(request: Request, env: Env): Promise<
       title: candidate.title,
       summary: candidate.summary,
       viewCount: candidate.viewCount,
+      coverImageUrl: candidate.coverImageUrl ?? null,
     }),
     { expirationTtl: MOST_VIEWED_ARTICLE_KV_TTL_SECONDS },
   );
@@ -586,6 +595,7 @@ function articleContentEquals(a: Article, b: Article): boolean {
     a.content === b.content &&
     a.publishedAt === b.publishedAt &&
     a.linkedinVideoEmbedUrl === b.linkedinVideoEmbedUrl &&
+    a.coverImageUrl === b.coverImageUrl &&
     a.tags.length === b.tags.length &&
     a.tags.every((tag, i) => tag === b.tags[i])
   );

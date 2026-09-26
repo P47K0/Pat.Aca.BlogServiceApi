@@ -34,5 +34,12 @@ namespace Pat.Aca.BlogServiceApi
         // needs a real, fetchable slug but isn't a blog post (e.g. the /about
         // CV-like document). Defaults false so every existing article stays
         // listed exactly as before this field was added.
-        bool Unlisted = false);
+        bool Unlisted = false,
+        // Absolute https URL of this article's cover image (a pre-resized
+        // 1200x630 JPEG on images.koorevaar.com, generated once at write/
+        // backfill time rather than transformed per request), or null for
+        // an article without one. Used for og:image/twitter:image and the
+        // homepage's most-viewed thumbnail; both simply omit the image
+        // when this is null.
+        string? CoverImageUrl = null);
 }

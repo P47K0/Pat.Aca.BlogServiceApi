@@ -9,7 +9,7 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
         [Fact]
         public async Task SyncAsync_publishes_the_most_viewed_article_when_one_exists()
         {
-            var article = new MostViewedArticleResult("popular-post", "Popular Post", "A summary.", 42);
+            var article = new MostViewedArticleResult("popular-post", "Popular Post", "A summary.", 42, "https://images.koorevaar.com/covers/popular-post.jpg");
             var repository = new FakeMostViewedArticleRepository(article);
             var publisher = new FakeMostViewedArticlePublisher();
             var processor = new MostViewedSyncProcessor(repository, publisher, NullLogger<MostViewedSyncProcessor>.Instance);

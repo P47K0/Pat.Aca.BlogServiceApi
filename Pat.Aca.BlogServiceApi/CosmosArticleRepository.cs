@@ -195,7 +195,7 @@ namespace Pat.Aca.BlogServiceApi
             // is synced to KV via a periodic TimerTrigger Function instead
             // (see IArticleRepository's own doc comment).
             var query = new QueryDefinition(
-                "SELECT TOP 1 c.slug, c.title, c.summary, c.viewCount FROM c " +
+                "SELECT TOP 1 c.slug, c.title, c.summary, c.viewCount, c.coverImageUrl FROM c " +
                 "WHERE c.publishedAt <= @now AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false) " +
                 "ORDER BY c.viewCount DESC")
                 .WithParameter("@now", DateTime.UtcNow);
@@ -209,7 +209,7 @@ namespace Pat.Aca.BlogServiceApi
                 var top = response.Resource.FirstOrDefault();
                 if (top is not null)
                 {
-                    return new MostViewedArticle(top.Slug, top.Title, top.Summary, top.ViewCount);
+                    return new MostViewedArticle(top.Slug, top.Title, top.Summary, top.ViewCount, top.CoverImageUrl);
                 }
             }
 
@@ -217,7 +217,7 @@ namespace Pat.Aca.BlogServiceApi
         }
 
         // Narrow projection shape for GetMostViewedArticleAsync's SELECT --
-        // only the four fields that query actually returns, not the full
+        // only the five fields that query actually returns, not the full
         // ArticleDocument below.
         private sealed class MostViewedArticleDocument
         {
@@ -232,6 +232,9 @@ namespace Pat.Aca.BlogServiceApi
 
             [JsonProperty("viewCount")]
             public int ViewCount { get; set; }
+
+            [JsonProperty("coverImageUrl")]
+            public string? CoverImageUrl { get; set; }
         }
 
         public async Task<ArticlesPage> GetArticlesPageAsync(int limit, string? afterSlug)
@@ -404,7 +407,8 @@ namespace Pat.Aca.BlogServiceApi
                 SeriesName = request.SeriesName,
                 SeriesOrder = request.SeriesOrder,
                 RelatedSlugs = request.RelatedSlugs,
-                Unlisted = request.Unlisted
+                Unlisted = request.Unlisted,
+                CoverImageUrl = request.CoverImageUrl
             };
 
             ItemResponse<ArticleDocument> response = await _container.CreateItemAsync(document, new PartitionKey(document.Slug));
@@ -437,7 +441,8 @@ namespace Pat.Aca.BlogServiceApi
                 PatchOperation.Set("/seriesName", request.SeriesName),
                 PatchOperation.Set("/seriesOrder", request.SeriesOrder),
                 PatchOperation.Set("/relatedSlugs", request.RelatedSlugs),
-                PatchOperation.Set("/unlisted", request.Unlisted)
+                PatchOperation.Set("/unlisted", request.Unlisted),
+                PatchOperation.Set("/coverImageUrl", request.CoverImageUrl)
             };
 
             ItemResponse<ArticleDocument> response = await _container.PatchItemAsync<ArticleDocument>(
@@ -453,7 +458,7 @@ namespace Pat.Aca.BlogServiceApi
             // Existing hand-authored articles keep their old (PascalCase-stored)
             // Id value untouched; it's simply never read or written by this
             // class's write methods.
-            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl, document.SeriesName, document.SeriesOrder, document.RelatedSlugs, document.Unlisted);
+            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl, document.SeriesName, document.SeriesOrder, document.RelatedSlugs, document.Unlisted, document.CoverImageUrl);
 
         /// <summary>
         /// The exact JSON shape written to/read from Cosmos by every method in
@@ -519,6 +524,9 @@ namespace Pat.Aca.BlogServiceApi
 
             [JsonProperty("unlisted")]
             public bool Unlisted { get; set; }
+
+            [JsonProperty("coverImageUrl")]
+            public string? CoverImageUrl { get; set; }
         }
 
         public async Task<List<ArticleSummary>> GetRecentArticlesAsync(int count = 5)
