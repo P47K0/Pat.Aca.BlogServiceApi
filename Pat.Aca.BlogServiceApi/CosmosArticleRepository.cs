@@ -430,6 +430,11 @@ namespace Pat.Aca.BlogServiceApi
             // never has to read or preserve viewCount (or guess any other
             // property's real casing on existing hand-authored documents),
             // since it only ever touches the specific paths named here.
+            //
+            // Cosmos caps a single patch request at 10 operations (an 11th
+            // made every PUT 500 in production), so the operations are split
+            // across two PatchItem calls in one TransactionalBatch: same
+            // item, same partition, applied atomically in order.
             var patchOperations = new List<PatchOperation>
             {
                 PatchOperation.Set("/title", request.Title),
@@ -445,13 +450,29 @@ namespace Pat.Aca.BlogServiceApi
                 PatchOperation.Set("/coverImageUrl", request.CoverImageUrl)
             };
 
-            ItemResponse<ArticleDocument> response = await _container.PatchItemAsync<ArticleDocument>(
-                cosmosId,
-                new PartitionKey(slug),
-                patchOperations);
+            TransactionalBatch batch = _container.CreateTransactionalBatch(new PartitionKey(slug));
+            foreach (var chunk in patchOperations.Chunk(MaxPatchOperationsPerRequest))
+            {
+                batch.PatchItem(cosmosId, chunk);
+            }
 
-            return ToArticle(response.Resource);
+            using TransactionalBatchResponse response = await batch.ExecuteAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new CosmosException(
+                    $"Article update batch failed: {response.ErrorMessage}",
+                    response.StatusCode, 0, response.ActivityId, response.RequestCharge);
+            }
+
+            // The last patch's result is the fully updated document; read it
+            // back only if the batch response came without a body.
+            ArticleDocument? updated = response.GetOperationResultAtIndex<ArticleDocument>(response.Count - 1).Resource;
+            updated ??= (await _container.ReadItemAsync<ArticleDocument>(cosmosId, new PartitionKey(slug))).Resource;
+            return ToArticle(updated);
         }
+
+        // Cosmos's documented per-request limit for Patch operations.
+        private const int MaxPatchOperationsPerRequest = 10;
 
         private static Article ToArticle(ArticleDocument document) =>
             // Id is always 0 here — dropped from the write path per the BRD.
