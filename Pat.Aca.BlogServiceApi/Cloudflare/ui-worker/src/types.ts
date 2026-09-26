@@ -79,9 +79,9 @@ export interface Article {
   /** Authored search keywords, distinct from `tags`; null/undefined means
    * no <meta name="keywords"> and `tags` for JSON-LD keywords. */
   seoKeywords?: string[] | null;
-  /** HTML (rendered from Markdown by api-proxy, like `content`) for the
-   * block below the article body, e.g. the "Co-authored with Claude."
-   * byline; null/undefined means no footer. */
+  /** HTML for the block below the article body: api-proxy's shared
+   * ARTICLE_FOOTER, rendered like `content`. null/undefined for unlisted
+   * articles. */
   footer?: string | null;
 }
 

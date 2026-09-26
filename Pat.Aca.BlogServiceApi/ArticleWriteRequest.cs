@@ -33,8 +33,5 @@ namespace Pat.Aca.BlogServiceApi
         // Optional, validated when present (see ArticleWriteValidation).
         // See Article.SeoDescription/SeoKeywords.
         string? SeoDescription = null,
-        List<string>? SeoKeywords = null,
-        // Optional, but when present must be non-blank (see
-        // ArticleWriteValidation). See Article.Footer.
-        string? Footer = null);
+        List<string>? SeoKeywords = null);
 }

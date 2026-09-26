@@ -57,11 +57,6 @@ namespace Pat.Aca.BlogServiceApi
                 errors.Add($"seoKeywords must have 1 to {MaxSeoKeywords} non-empty entries without commas.");
             }
 
-            if (request.Footer is not null && string.IsNullOrWhiteSpace(request.Footer))
-            {
-                errors.Add("footer must be non-empty when present.");
-            }
-
             return errors;
         }
     }

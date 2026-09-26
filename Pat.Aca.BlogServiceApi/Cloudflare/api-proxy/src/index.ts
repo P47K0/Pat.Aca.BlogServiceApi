@@ -132,12 +132,19 @@ interface Article {
   coverImageUrl?: string | null;
   seoDescription?: string | null;
   seoKeywords?: string[] | null;
-  /** Raw Markdown for the block shown below the article body (e.g. the
-   * "Co-authored with Claude." byline), rendered to HTML the same way as
-   * `content`. Kept separate from `content` so it isn't embedded into the
-   * KnowledgeBase as its own chunk on every article. */
+  /** Hides the article from lists; also means it gets no ARTICLE_FOOTER
+   * (e.g. the `about` CV document the AI assistant reads). */
+  unlisted?: boolean;
+  /** Not stored by the API: set here to the rendered ARTICLE_FOOTER for
+   * listed articles, so ui-worker has one place to take it from. */
   footer?: string | null;
 }
+
+/** The one footer shown under every listed article, in Markdown. It lives
+ * here rather than in each article's `content`, where it would be embedded
+ * into the KnowledgeBase as its own chunk on every article. Text specific
+ * to one article belongs at the end of that article's `content`. */
+const ARTICLE_FOOTER = '*Co-authored with Claude.*';
 
 /** Every article's Markdown source conventionally opens with a `# Title`
  * line mirroring `article.title` — but ArticleDetailPage (ui-worker) already
@@ -172,7 +179,7 @@ function renderArticleContent(article: Article): Article {
       marked.parse(article.content, { async: false }) as string,
       article.title,
     ),
-    ...(article.footer ? { footer: marked.parse(article.footer, { async: false }) as string } : {}),
+    footer: article.unlisted ? null : (marked.parse(ARTICLE_FOOTER, { async: false }) as string),
   };
 }
 
@@ -530,10 +537,9 @@ async function fetchArticleMarkdown(env: Env, slug: string): Promise<Response> {
   const article = (await upstreamResponse.json()) as Article;
   headers.set('Content-Type', 'text/markdown; charset=utf-8');
   headers.set(CACHED_AT_HEADER, String(Date.now()));
-  // The footer is appended under a thematic break, the same shape the
-  // byline had when it still lived inside `content`, so the Markdown view
-  // keeps showing it.
-  const markdown = article.footer ? `${article.content.trimEnd()}\n\n---\n\n${article.footer}\n` : article.content;
+  // Under a thematic break, the shape the byline had when it still lived
+  // inside `content`.
+  const markdown = article.unlisted ? article.content : `${article.content.trimEnd()}\n\n---\n\n${ARTICLE_FOOTER}\n`;
   return new Response(markdown, { status: 200, headers });
 }
 
