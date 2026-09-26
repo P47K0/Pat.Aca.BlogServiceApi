@@ -457,6 +457,53 @@ namespace Pat.ACA.BlogServiceTests
             Assert.Contains("coverImageUrl must be an absolute https URL.", errors);
         }
 
+        [Fact]
+        public void ArticleWriteValidation_passes_for_valid_seo_fields()
+        {
+            var request = new ArticleWriteRequest("slug", "Title", "Content.",
+                SeoDescription: new string('a', ArticleWriteValidation.MaxSeoDescriptionLength),
+                SeoKeywords: new List<string> { "azure container apps", "cosmos db" });
+
+            var errors = ArticleWriteValidation.Validate(request);
+
+            Assert.Empty(errors);
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        [InlineData(null)]
+        public void ArticleWriteValidation_fails_for_a_blank_or_too_long_seo_description(string? seoDescription)
+        {
+            // null stands in for "one character over the limit" -- InlineData
+            // can't take a computed string.
+            var value = seoDescription ?? new string('a', ArticleWriteValidation.MaxSeoDescriptionLength + 1);
+            var request = new ArticleWriteRequest("slug", "Title", "Content.", SeoDescription: value);
+
+            var errors = ArticleWriteValidation.Validate(request);
+
+            Assert.Contains(errors, error => error.StartsWith("seoDescription"));
+        }
+
+        public static TheoryData<List<string>> InvalidSeoKeywords => new()
+        {
+            new List<string>(),
+            new List<string> { "valid", " " },
+            new List<string> { "has, comma" },
+            Enumerable.Range(1, ArticleWriteValidation.MaxSeoKeywords + 1).Select(i => $"keyword {i}").ToList(),
+        };
+
+        [Theory]
+        [MemberData(nameof(InvalidSeoKeywords))]
+        public void ArticleWriteValidation_fails_for_invalid_seo_keywords(List<string> seoKeywords)
+        {
+            var request = new ArticleWriteRequest("slug", "Title", "Content.", SeoKeywords: seoKeywords);
+
+            var errors = ArticleWriteValidation.Validate(request);
+
+            Assert.Contains(errors, error => error.StartsWith("seoKeywords"));
+        }
+
         // --- CommentWriteValidation ---
 
         private static readonly CommentSettings DefaultCommentSettings = new();

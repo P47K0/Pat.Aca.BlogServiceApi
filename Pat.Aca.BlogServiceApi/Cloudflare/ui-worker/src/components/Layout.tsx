@@ -1,12 +1,19 @@
 import type { FC, PropsWithChildren } from 'hono/jsx';
 
+/** The blog's one author, shared by <meta name="author">, article:author,
+ * and the JSON-LD author (index.tsx) so they can't drift apart. */
+export const SITE_AUTHOR = {
+  name: 'Patrick Koorevaar',
+  url: 'https://www.koorevaar.com/',
+} as const;
+
 export interface SeoProps {
   /** Page-specific title, e.g. an article's title or "Home". Rendered as
    * "{title} · koorevaar.com Blog" in <title>/og:title/twitter:title. */
   title: string;
-  /** Plain-text summary for <meta name="description">/og:description —
-   * derived from the article's existing `summary` field for article pages,
-   * or a fixed site description elsewhere. No new content to author. */
+  /** Plain-text description for <meta name="description">/og:description/
+   * twitter:description — the article's `seoDescription` when it has one,
+   * else its `summary`, or a fixed site description on other pages. */
   description: string;
   /** Absolute URL of this page, built from Env.SITE_URL by the caller — used
    * for <link rel="canonical"> and og:url/twitter won't need it. */
@@ -36,6 +43,10 @@ export interface SeoProps {
    * article pages only. Emitted as og:image/twitter:image, and switches the
    * Twitter card to summary_large_image; omitted entirely when absent. */
   imageUrl?: string | null;
+  /** Article.seoKeywords, article pages only — emitted as
+   * <meta name="keywords"> when present. Not the navigation `tags`, which
+   * stay article:tag. */
+  keywords?: string[] | null;
 }
 
 export const Layout: FC<PropsWithChildren<SeoProps>> = ({
@@ -49,6 +60,7 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
   jsonLd,
   searchQuery = '',
   imageUrl,
+  keywords,
   children,
 }) => {
   const fullTitle = `${title} · koorevaar.com Blog`;
@@ -60,6 +72,8 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>{fullTitle}</title>
         <meta name="description" content={description} />
+        <meta name="author" content={SITE_AUTHOR.name} />
+        {keywords && keywords.length > 0 && <meta name="keywords" content={keywords.join(', ')} />}
         <link rel="canonical" href={canonicalUrl} />
         <meta name="robots" content={noindex ? 'noindex, nofollow' : 'index, follow'} />
         {/* Relative href resolves against whatever page it's on — no need to
@@ -72,7 +86,8 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
         />
 
         {/* Open Graph — all values come from data the API already returns
-            (title/summary/publishedAt/tags/coverImageUrl). og:image only
+            (title/seoDescription or summary/publishedAt/tags/coverImageUrl).
+            article:author is a profile URL, per the Open Graph spec. og:image only
             when the article has a cover image; nothing is inferred from
             inline Markdown images. */}
         <meta property="og:type" content={type} />
@@ -84,6 +99,7 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
         {type === 'article' && publishedAt && (
           <meta property="article:published_time" content={publishedAt} />
         )}
+        {type === 'article' && <meta property="article:author" content={SITE_AUTHOR.url} />}
         {type === 'article' && tags?.map((tag) => <meta property="article:tag" content={tag} />)}
 
         <meta name="twitter:card" content={imageUrl ? 'summary_large_image' : 'summary'} />

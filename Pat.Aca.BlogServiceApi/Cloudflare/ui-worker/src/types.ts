@@ -73,6 +73,12 @@ export interface Article {
   /** Absolute URL of a pre-resized 1200x630 JPEG cover image, or null/
    * undefined if the article has none. Used for og:image/twitter:image. */
   coverImageUrl?: string | null;
+  /** Authored search-snippet description (max 160 chars), distinct from
+   * `summary`; null/undefined means "fall back to summary". */
+  seoDescription?: string | null;
+  /** Authored search keywords, distinct from `tags`; null/undefined means
+   * no <meta name="keywords"> and `tags` for JSON-LD keywords. */
+  seoKeywords?: string[] | null;
 }
 
 /** Thrown when api-proxy returns a non-2xx/404 status or the fetch itself

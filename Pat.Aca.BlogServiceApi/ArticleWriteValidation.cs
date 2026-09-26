@@ -8,6 +8,9 @@ namespace Pat.Aca.BlogServiceApi
     /// </summary>
     public static class ArticleWriteValidation
     {
+        public const int MaxSeoDescriptionLength = 160;
+        public const int MaxSeoKeywords = 10;
+
         public static List<string> Validate(ArticleWriteRequest request)
         {
             var errors = new List<string>();
@@ -35,6 +38,23 @@ namespace Pat.Aca.BlogServiceApi
                 !(Uri.TryCreate(request.CoverImageUrl, UriKind.Absolute, out var coverUri) && coverUri.Scheme == Uri.UriSchemeHttps))
             {
                 errors.Add("coverImageUrl must be an absolute https URL.");
+            }
+
+            // Search engines truncate meta descriptions at roughly 155-160
+            // characters, so anything longer is cut off mid-sentence.
+            if (request.SeoDescription is not null &&
+                (string.IsNullOrWhiteSpace(request.SeoDescription) || request.SeoDescription.Length > MaxSeoDescriptionLength))
+            {
+                errors.Add($"seoDescription must be non-empty and at most {MaxSeoDescriptionLength} characters.");
+            }
+
+            if (request.SeoKeywords is not null &&
+                (request.SeoKeywords.Count == 0 || request.SeoKeywords.Count > MaxSeoKeywords ||
+                 request.SeoKeywords.Any(keyword => string.IsNullOrWhiteSpace(keyword) || keyword.Contains(','))))
+            {
+                // No commas: the keywords are joined with ", " for
+                // <meta name="keywords"> and JSON-LD.
+                errors.Add($"seoKeywords must have 1 to {MaxSeoKeywords} non-empty entries without commas.");
             }
 
             return errors;
