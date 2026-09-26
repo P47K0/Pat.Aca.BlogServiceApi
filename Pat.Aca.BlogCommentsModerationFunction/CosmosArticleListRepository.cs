@@ -38,7 +38,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         public async Task<List<ArticleListItem>> GetLatestArticlesAsync(CancellationToken cancellationToken = default)
         {
             var query = new QueryDefinition(
-                "SELECT TOP @limit c.id, c.slug, c.title, c.summary, c.publishedAt, c.tags, " +
+                "SELECT TOP @limit c.slug, c.title, c.summary, c.publishedAt, c.tags, " +
                 "c.viewCount, c.linkedinVideoEmbedUrl FROM c " +
                 "WHERE c.publishedAt <= @now AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false) " +
                 "ORDER BY c.publishedAt DESC")
@@ -52,8 +52,10 @@ namespace Pat.Aca.BlogCommentsModerationFunction
             while (iterator.HasMoreResults)
             {
                 FeedResponse<ArticleListDocument> response = await iterator.ReadNextAsync(cancellationToken);
+                // Id is always 0, as the API returns it: the Cosmos `id` is a
+                // GUID string on API-created articles, not the legacy int.
                 articles.AddRange(response.Resource.Select(document => new ArticleListItem(
-                    document.Id,
+                    0,
                     document.Slug,
                     document.Title,
                     document.Summary,
@@ -68,9 +70,6 @@ namespace Pat.Aca.BlogCommentsModerationFunction
 
         private sealed class ArticleListDocument
         {
-            [JsonProperty("id")]
-            public int Id { get; set; }
-
             [JsonProperty("slug")]
             public string Slug { get; set; } = string.Empty;
 
