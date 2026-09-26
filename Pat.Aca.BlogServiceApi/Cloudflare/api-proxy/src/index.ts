@@ -338,7 +338,12 @@ async function handleArticleCountSync(request: Request, env: Env): Promise<Respo
     return new Response(null, { status: 400 });
   }
 
-  await env.ARTICLES_FALLBACK.put(ARTICLE_COUNT_KV_KEY, String(count));
+  // The Function pushes after every article write, but most writes (edits)
+  // don't change the count; skipping those keeps a bulk edit from spending
+  // the KV free tier's daily write quota. Reads are far cheaper there.
+  if ((await env.ARTICLES_FALLBACK.get(ARTICLE_COUNT_KV_KEY)) !== String(count)) {
+    await env.ARTICLES_FALLBACK.put(ARTICLE_COUNT_KV_KEY, String(count));
+  }
   return new Response(null, { status: 204 });
 }
 
@@ -643,6 +648,25 @@ function parseFallbackSnapshot(raw: string): FallbackSnapshot {
   return Array.isArray(parsed) ? { writtenAt: 0, articles: parsed as Article[] } : (parsed as FallbackSnapshot);
 }
 
+/** True when two list entries match on the fields both FALLBACK_KV_KEY
+ * producers supply. ArticleListSyncFunction's push carries only these
+ * (no coverImageUrl/seo fields, and no api-proxy-rendered footer), so
+ * comparing everything articleContentEquals does would make every push,
+ * and the origin fetch after it, look like a change and write KV. None of
+ * the other fields are shown on a list card. publishedAt is compared as an
+ * instant, since the Function forwards Cosmos's stored string as-is. */
+function listItemEquals(a: Article, b: Article): boolean {
+  return (
+    a.slug === b.slug &&
+    a.title === b.title &&
+    a.summary === b.summary &&
+    Date.parse(a.publishedAt) === Date.parse(b.publishedAt) &&
+    (a.linkedinVideoEmbedUrl ?? null) === (b.linkedinVideoEmbedUrl ?? null) &&
+    a.tags.length === b.tags.length &&
+    a.tags.every((tag, i) => tag === b.tags[i])
+  );
+}
+
 /** Shared by both writers of FALLBACK_KV_KEY: a successful origin list fetch
  * (writeFallbackSnapshot below) and ArticleListSyncFunction's Change-Feed-
  * driven push (handleArticleListSync, see "Article list sync" below) — same
@@ -660,7 +684,7 @@ async function writeFallbackSnapshotFromArticles(env: Env, articles: Article[]):
     const existingSnapshot = parseFallbackSnapshot(existing);
     if (
       latest.length === existingSnapshot.articles.length &&
-      latest.every((article, i) => articleContentEquals(article, existingSnapshot.articles[i]))
+      latest.every((article, i) => listItemEquals(article, existingSnapshot.articles[i]))
     ) {
       return;
     }
