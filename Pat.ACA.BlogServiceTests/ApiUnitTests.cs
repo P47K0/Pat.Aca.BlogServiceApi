@@ -346,6 +346,28 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task InMemoryArticleRepository_GetMostViewedArticleAsync_includes_the_cover_image_url()
+        {
+            var repository = new InMemoryArticleRepository();
+            var request = new ArticleWriteRequest("covered-most-viewed", "Covered Popular", "Content.", "Summary.", DateTime.UtcNow.AddDays(-1),
+                CoverImageUrl: "https://images.koorevaar.com/covers/covered-most-viewed.jpg");
+            await repository.CreateArticleAsync(request);
+            // SeedArticles is static, shared with the unlisted test above,
+            // which asserts the listed winner stays under 1000 views -- 500
+            // still beats every seeded article without breaking that.
+            for (var i = 0; i < 500; i++)
+            {
+                await repository.IncrementViewCountAsync("covered-most-viewed");
+            }
+
+            var mostViewed = await repository.GetMostViewedArticleAsync();
+
+            Assert.NotNull(mostViewed);
+            Assert.Equal("covered-most-viewed", mostViewed!.Slug);
+            Assert.Equal(request.CoverImageUrl, mostViewed.CoverImageUrl);
+        }
+
+        [Fact]
         public async Task InMemoryArticleRepository_CreateArticleAsync_returns_null_for_duplicate_slug()
         {
             var repository = new InMemoryArticleRepository();
@@ -409,6 +431,30 @@ namespace Pat.ACA.BlogServiceTests
             var errors = ArticleWriteValidation.Validate(request);
 
             Assert.NotEmpty(errors);
+        }
+
+        [Fact]
+        public void ArticleWriteValidation_passes_for_an_absolute_https_cover_image_url()
+        {
+            var request = new ArticleWriteRequest("slug", "Title", "Content.", CoverImageUrl: "https://images.koorevaar.com/covers/slug.jpg");
+
+            var errors = ArticleWriteValidation.Validate(request);
+
+            Assert.Empty(errors);
+        }
+
+        [Theory]
+        [InlineData("http://images.koorevaar.com/covers/slug.jpg")]
+        [InlineData("/covers/slug.jpg")]
+        [InlineData("javascript:alert(1)")]
+        [InlineData("")]
+        public void ArticleWriteValidation_fails_for_a_cover_image_url_that_is_not_absolute_https(string coverImageUrl)
+        {
+            var request = new ArticleWriteRequest("slug", "Title", "Content.", CoverImageUrl: coverImageUrl);
+
+            var errors = ArticleWriteValidation.Validate(request);
+
+            Assert.Contains("coverImageUrl must be an absolute https URL.", errors);
         }
 
         // --- CommentWriteValidation ---

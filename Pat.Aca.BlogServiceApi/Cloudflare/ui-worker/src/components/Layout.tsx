@@ -32,6 +32,10 @@ export interface SeoProps {
    * Every other page leaves this unset (empty box), which is correct there
    * too — there's no "current query" outside the results page. */
   searchQuery?: string;
+  /** Absolute URL of the article's cover image (Article.coverImageUrl),
+   * article pages only. Emitted as og:image/twitter:image, and switches the
+   * Twitter card to summary_large_image; omitted entirely when absent. */
+  imageUrl?: string | null;
 }
 
 export const Layout: FC<PropsWithChildren<SeoProps>> = ({
@@ -44,6 +48,7 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
   noindex,
   jsonLd,
   searchQuery = '',
+  imageUrl,
   children,
 }) => {
   const fullTitle = `${title} · koorevaar.com Blog`;
@@ -67,23 +72,24 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
         />
 
         {/* Open Graph — all values come from data the API already returns
-            (title/summary/publishedAt/tags), nothing new to author. No
-            og:image: no per-article image field exists yet (content images
-            are inline in the Markdown body, not a dedicated cover-image
-            field) — a real gap for rich social-card previews, deferred. */}
+            (title/summary/publishedAt/tags/coverImageUrl). og:image only
+            when the article has a cover image; nothing is inferred from
+            inline Markdown images. */}
         <meta property="og:type" content={type} />
         <meta property="og:site_name" content="koorevaar.com Blog" />
         <meta property="og:title" content={title} />
         <meta property="og:description" content={description} />
         <meta property="og:url" content={canonicalUrl} />
+        {imageUrl && <meta property="og:image" content={imageUrl} />}
         {type === 'article' && publishedAt && (
           <meta property="article:published_time" content={publishedAt} />
         )}
         {type === 'article' && tags?.map((tag) => <meta property="article:tag" content={tag} />)}
 
-        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:card" content={imageUrl ? 'summary_large_image' : 'summary'} />
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content={description} />
+        {imageUrl && <meta name="twitter:image" content={imageUrl} />}
 
         {jsonLd && (
           <script

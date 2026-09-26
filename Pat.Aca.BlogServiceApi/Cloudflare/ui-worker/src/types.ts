@@ -70,6 +70,9 @@ export interface Article {
    * full Article objects (title/date) by index.tsx before reaching
    * ArticleDetailPage, since this field alone only carries slugs. */
   relatedSlugs?: string[] | null;
+  /** Absolute URL of a pre-resized 1200x630 JPEG cover image, or null/
+   * undefined if the article has none. Used for og:image/twitter:image. */
+  coverImageUrl?: string | null;
 }
 
 /** Thrown when api-proxy returns a non-2xx/404 status or the fetch itself

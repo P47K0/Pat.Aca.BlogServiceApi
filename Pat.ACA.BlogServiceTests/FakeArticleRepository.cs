@@ -54,7 +54,7 @@ public sealed class FakeArticleRepository : IArticleRepository
 
         return Task.FromResult(top is null
             ? null
-            : new MostViewedArticle(top.Slug, top.Title, top.Summary, top.ViewCount));
+            : new MostViewedArticle(top.Slug, top.Title, top.Summary, top.ViewCount, top.CoverImageUrl));
     }
 
     public Task<Article?> IncrementViewCountAsync(string slug)
@@ -79,7 +79,7 @@ public sealed class FakeArticleRepository : IArticleRepository
             return Task.FromResult<Article?>(null);
         }
 
-        var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>(), LinkedinVideoEmbedUrl: request.LinkedinVideoEmbedUrl, SeriesName: request.SeriesName, SeriesOrder: request.SeriesOrder, RelatedSlugs: request.RelatedSlugs, Unlisted: request.Unlisted);
+        var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>(), LinkedinVideoEmbedUrl: request.LinkedinVideoEmbedUrl, SeriesName: request.SeriesName, SeriesOrder: request.SeriesOrder, RelatedSlugs: request.RelatedSlugs, Unlisted: request.Unlisted, CoverImageUrl: request.CoverImageUrl);
         SeedArticles.Add(article);
         return Task.FromResult<Article?>(article);
     }
@@ -103,7 +103,8 @@ public sealed class FakeArticleRepository : IArticleRepository
             SeriesName = request.SeriesName,
             SeriesOrder = request.SeriesOrder,
             RelatedSlugs = request.RelatedSlugs,
-            Unlisted = request.Unlisted
+            Unlisted = request.Unlisted,
+            CoverImageUrl = request.CoverImageUrl
         };
         SeedArticles[index] = updated;
         return Task.FromResult<Article?>(updated);

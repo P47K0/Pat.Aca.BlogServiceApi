@@ -59,7 +59,7 @@ namespace Pat.Aca.BlogServiceApi
 
             return Task.FromResult(top is null
                 ? null
-                : new MostViewedArticle(top.Slug, top.Title, top.Summary, top.ViewCount));
+                : new MostViewedArticle(top.Slug, top.Title, top.Summary, top.ViewCount, top.CoverImageUrl));
         }
 
         public Task<Article?> IncrementViewCountAsync(string slug)
@@ -86,7 +86,7 @@ namespace Pat.Aca.BlogServiceApi
 
             // Id dropped from the write path per the BRD (legacy, never used
             // for lookups) — new articles just get 0.
-            var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>(), LinkedinVideoEmbedUrl: request.LinkedinVideoEmbedUrl, SeriesName: request.SeriesName, SeriesOrder: request.SeriesOrder, RelatedSlugs: request.RelatedSlugs, Unlisted: request.Unlisted);
+            var article = new Article(0, request.Slug, request.Title, request.Summary ?? "", request.Content, request.PublishedAt, request.Tags ?? new List<string>(), LinkedinVideoEmbedUrl: request.LinkedinVideoEmbedUrl, SeriesName: request.SeriesName, SeriesOrder: request.SeriesOrder, RelatedSlugs: request.RelatedSlugs, Unlisted: request.Unlisted, CoverImageUrl: request.CoverImageUrl);
             SeedArticles.Add(article);
             return Task.FromResult<Article?>(article);
         }
@@ -112,7 +112,8 @@ namespace Pat.Aca.BlogServiceApi
                 SeriesName = request.SeriesName,
                 SeriesOrder = request.SeriesOrder,
                 RelatedSlugs = request.RelatedSlugs,
-                Unlisted = request.Unlisted
+                Unlisted = request.Unlisted,
+                CoverImageUrl = request.CoverImageUrl
             };
             SeedArticles[index] = updated;
             return Task.FromResult<Article?>(updated);

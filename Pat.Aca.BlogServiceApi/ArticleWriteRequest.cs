@@ -26,5 +26,8 @@ namespace Pat.Aca.BlogServiceApi
         List<string>? RelatedSlugs = null,
         // Pass-through, no required validation. See Article.Unlisted for
         // what this means.
-        bool Unlisted = false);
+        bool Unlisted = false,
+        // Optional, but when present must be an absolute https URL (see
+        // ArticleWriteValidation). See Article.CoverImageUrl.
+        string? CoverImageUrl = null);
 }

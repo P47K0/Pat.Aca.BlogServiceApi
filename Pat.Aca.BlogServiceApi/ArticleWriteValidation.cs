@@ -27,6 +27,16 @@ namespace Pat.Aca.BlogServiceApi
                 errors.Add("content is required.");
             }
 
+            // Rendered as an <img src> and og:image as-is, so reject anything
+            // that isn't an absolute https URL (e.g. javascript:, relative
+            // paths) rather than passing it through like the other optional
+            // fields.
+            if (request.CoverImageUrl is not null &&
+                !(Uri.TryCreate(request.CoverImageUrl, UriKind.Absolute, out var coverUri) && coverUri.Scheme == Uri.UriSchemeHttps))
+            {
+                errors.Add("coverImageUrl must be an absolute https URL.");
+            }
+
             return errors;
         }
     }

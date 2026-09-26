@@ -179,6 +179,7 @@ app.get('/articles/:slug', async (c) => {
       type="article"
       publishedAt={article.publishedAt}
       tags={article.tags}
+      imageUrl={article.coverImageUrl}
       jsonLd={{
         '@context': 'https://schema.org',
         '@type': 'BlogPosting',
@@ -188,6 +189,7 @@ app.get('/articles/:slug', async (c) => {
         url: canonicalUrl,
         keywords: article.tags.join(', '),
         author: { '@type': 'Person', name: 'Patrick Koorevaar' },
+        ...(article.coverImageUrl ? { image: article.coverImageUrl } : {}),
       }}
     >
       <ArticleDetailPage

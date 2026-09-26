@@ -154,6 +154,33 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task POST_articles_persists_cover_image_url()
+        {
+            var client = CreateClient("Articles.Write");
+            var request = ValidRequest("cover-image-article") with
+            {
+                CoverImageUrl = "https://images.koorevaar.com/covers/cover-image-article.jpg"
+            };
+
+            using var response = await client.PostAsJsonAsync("/articles", request);
+
+            var created = await response.Content.ReadFromJsonAsync<Article>();
+            Assert.NotNull(created);
+            Assert.Equal(request.CoverImageUrl, created!.CoverImageUrl);
+        }
+
+        [Fact]
+        public async Task POST_articles_returns_400_for_a_non_https_cover_image_url()
+        {
+            var client = CreateClient("Articles.Write");
+            var request = ValidRequest("bad-cover-image-article") with { CoverImageUrl = "javascript:alert(1)" };
+
+            using var response = await client.PostAsJsonAsync("/articles", request);
+
+            Assert.Equal((int)HttpStatusCode.BadRequest, (int)response.StatusCode);
+        }
+
+        [Fact]
         public async Task POST_articles_persists_series_and_related_slugs()
         {
             var client = CreateClient("Articles.Write");

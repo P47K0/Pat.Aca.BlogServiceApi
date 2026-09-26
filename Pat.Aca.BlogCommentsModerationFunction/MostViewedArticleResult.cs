@@ -7,5 +7,5 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// CosmosArticleCountRepository's own doc comment: no project
     /// reference just to reuse one small type).
     /// </summary>
-    public sealed record MostViewedArticleResult(string Slug, string Title, string Summary, int ViewCount);
+    public sealed record MostViewedArticleResult(string Slug, string Title, string Summary, int ViewCount, string? CoverImageUrl = null);
 }
