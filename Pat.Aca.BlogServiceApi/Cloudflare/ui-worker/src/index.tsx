@@ -335,6 +335,47 @@ ${items}
   return c.body(body, 200, { 'Content-Type': 'application/rss+xml; charset=UTF-8' });
 });
 
+// llms.txt (llmstxt.org): a Markdown index for AI crawlers/agents, pointing
+// at the raw-Markdown routes above rather than the HTML pages. Built from
+// the same getArticles() list as the sitemap/feed, so a new article shows
+// up here without a separate step. The homepage's own llms.txt (separate
+// website repo) links to this one for the full article list.
+app.get('/llms.txt', async (c) => {
+  const articles = await getArticles(c.env);
+  const siteUrl = c.env.SITE_URL;
+  const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const linkText = (text: string) => oneLine(text).replace(/([[\]])/g, '\\$1');
+  const articleLines = articles.map(
+    (article) =>
+      `- [${linkText(article.title)}](${siteUrl}/articles/${article.slug}.md)${
+        article.summary ? `: ${oneLine(article.summary)}` : ''
+      }`,
+  );
+  const body = [
+    `# koorevaar.com Blog`,
+    '',
+    `> ${SITE_AUTHOR.name}'s blog: notes and write-ups on Azure, Kubernetes, DevOps and live LLM side projects.`,
+    '',
+    `Every article is available as raw Markdown at ${siteUrl}/articles/{slug}.md, the same URLs listed below.`,
+    '',
+    '## Profile',
+    '',
+    `- [About ${SITE_AUTHOR.name}](${siteUrl}/about.md): skills, certifications and projects, in Markdown`,
+    `- [Homepage](${SITE_AUTHOR.url})`,
+    '',
+    '## Articles',
+    '',
+    ...articleLines,
+    '',
+    '## Optional',
+    '',
+    `- [RSS feed](${siteUrl}/feed.xml)`,
+    `- [Sitemap](${siteUrl}/sitemap.xml)`,
+    '',
+  ].join('\n');
+  return c.body(body, 200, { 'Content-Type': 'text/plain; charset=utf-8' });
+});
+
 app.notFound((c) =>
   c.html(
     <Layout
