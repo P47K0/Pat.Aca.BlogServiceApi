@@ -210,15 +210,29 @@ app.get('/articles/:slug', async (c) => {
   );
 });
 
-// Same raw-Markdown mechanism as the per-article .md route above, pointed at
-// the fixed "about" slug —
-// a CV-like document (skills, certs, side projects) stored as one more
-// (Unlisted) article, doubling as an llms.txt-style resource for AI
-// crawlers/recruiter-assistants. `noindex` keeps the raw Markdown out of
+// /about.md: the CV-like profile (skills, certs, side projects) for AI
+// crawlers/recruiter-assistants. Served from the homepage's own
+// /llms-full.txt, a static asset that the website repo's CI keeps equal to
+// its about.md export, so about.md changes with every homepage deploy and
+// never waits on a scaled-to-zero Container App. The Unlisted `about`
+// article in Cosmos is the fallback when the homepage can't be reached, and
+// stays the source of the assistant's KnowledgeBase embeddings (refreshed
+// separately, see tools/about-sync). `noindex` keeps the raw Markdown out of
 // search engine results (it would duplicate the homepage CV); AI crawlers
 // don't act on it, so it doesn't get in the way of that second role.
+const ABOUT_MD_SOURCE_URL = new URL('/llms-full.txt', SITE_AUTHOR.url).toString();
+
+async function getHomepageAboutMarkdown(): Promise<string | null> {
+  try {
+    const response = await fetch(ABOUT_MD_SOURCE_URL, { cf: { cacheTtl: 300, cacheEverything: true } });
+    return response.ok ? await response.text() : null;
+  } catch {
+    return null;
+  }
+}
+
 app.get('/about.md', async (c) => {
-  const markdown = await getArticleMarkdown(c.env, 'about');
+  const markdown = (await getHomepageAboutMarkdown()) ?? (await getArticleMarkdown(c.env, 'about'));
   if (markdown === null) {
     return c.notFound();
   }
