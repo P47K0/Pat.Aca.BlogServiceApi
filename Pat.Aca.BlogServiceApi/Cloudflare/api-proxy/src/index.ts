@@ -601,6 +601,14 @@ const FALLBACK_KV_KEY = 'latest-10';
 const FALLBACK_SIZE = 10;
 const ORIGIN_TIMEOUT_MS = 2000;
 
+// Set on every list response served from the FALLBACK_KV_KEY snapshot, which
+// holds only the FALLBACK_SIZE newest articles. Lets a consumer that needs
+// the complete list (ui-worker's sitemap.xml) tell it apart from a real
+// origin response instead of silently publishing 10 URLs. The header travels
+// with the snapshot into the per-colo cache (fresherFallbackResponse), and a
+// later successful revalidate overwrites that entry without it.
+const LIST_PARTIAL_HEADER = 'X-List-Partial';
+
 /** True when two articles are identical apart from `viewCount` -- which the
  * origin bumps on every fetch by design (see this file's top-of-file SWR
  * comment on the accepted undercount), so it alone would make every
@@ -705,7 +713,7 @@ async function readFallbackSnapshot(env: Env): Promise<Response | null> {
   const snapshot = parseFallbackSnapshot(stored);
   return new Response(JSON.stringify(snapshot.articles), {
     status: 200,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+    headers: { 'Content-Type': 'application/json', [LIST_PARTIAL_HEADER]: 'true', ...CORS_HEADERS },
   });
 }
 
@@ -740,6 +748,7 @@ async function fresherFallbackResponse(env: Env, cachedAt: number): Promise<Resp
     headers: {
       'Content-Type': 'application/json',
       [CACHED_AT_HEADER]: String(snapshot.writtenAt),
+      [LIST_PARTIAL_HEADER]: 'true',
       ...CORS_HEADERS,
     },
   });
