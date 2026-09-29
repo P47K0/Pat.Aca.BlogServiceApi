@@ -548,24 +548,68 @@ async function fetchArticleMarkdown(env: Env, slug: string): Promise<Response> {
   return new Response(markdown, { status: 200, headers });
 }
 
-async function proxyArticleMarkdownRequest(
-  env: Env,
+// GET /articles-markdown: every listed article with its raw Markdown
+// `content`, as JSON, newest-first -- the source for ui-worker's
+// /llms-full.txt. One origin call (the API's plain full list, which already
+// excludes Unlisted and future-dated articles) instead of one .md fetch per
+// article, which would run past the Workers subrequest limit. Not under
+// /articles/, so no slug can collide with it. No footer: ui-worker states the
+// co-authorship once for the whole file.
+const ARTICLES_MARKDOWN_PATH = '/articles-markdown';
+
+async function fetchArticlesMarkdown(env: Env): Promise<Response> {
+  const upstreamUrl = new URL('/articles', env.API_BASE_URL);
+  const upstreamResponse = await fetch(upstreamUrl.toString(), {
+    method: 'GET',
+    headers: {
+      [API_KEY_HEADER]: env.ARTICLES_API_KEY,
+      Accept: 'application/json',
+    },
+  });
+
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+    headers.set(key, value);
+  }
+
+  if (!upstreamResponse.ok) {
+    headers.set('Content-Type', upstreamResponse.headers.get('content-type') ?? 'application/problem+json');
+    return new Response(upstreamResponse.body, { status: upstreamResponse.status, headers });
+  }
+
+  const articles = (await upstreamResponse.json()) as Article[];
+  const body = articles.map(({ slug, title, summary, publishedAt, tags, content }) => ({
+    slug,
+    title,
+    summary,
+    publishedAt,
+    tags,
+    content,
+  }));
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  headers.set(CACHED_AT_HEADER, String(Date.now()));
+  return new Response(JSON.stringify(body), { status: 200, headers });
+}
+
+/** Per-colo SWR for the raw-Markdown routes: serve what's cached, refresh it
+ * in the background once it's older than REVALIDATE_INTERVAL_MS. */
+async function proxyMarkdownRequest(
   ctx: ExecutionContext,
-  slug: string,
   key: Request,
+  fetchFromOrigin: () => Promise<Response>,
 ): Promise<Response> {
   const cached = await cache.match(key);
   if (cached) {
     const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
     if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
       ctx.waitUntil(
-        fetchArticleMarkdown(env, slug).then((response) => (response.ok ? cache.put(key, response.clone()) : undefined)),
+        fetchFromOrigin().then((response) => (response.ok ? cache.put(key, response.clone()) : undefined)),
       );
     }
     return cached;
   }
 
-  const response = await fetchArticleMarkdown(env, slug);
+  const response = await fetchFromOrigin();
   if (response.ok) {
     ctx.waitUntil(cache.put(key, response.clone()));
   }
@@ -1072,11 +1116,18 @@ export default {
     // Also checked before the generic dispatch -- these serve raw Markdown,
     // never the rendered-HTML shape fetchAndRender produces.
     if (pathname === ABOUT_MD_PATH) {
-      return proxyArticleMarkdownRequest(env, ctx, ABOUT_SLUG, cacheKeyFor(pathname, search, request.url));
+      return proxyMarkdownRequest(ctx, cacheKeyFor(pathname, search, request.url), () =>
+        fetchArticleMarkdown(env, ABOUT_SLUG),
+      );
     }
     const mdMatch = pathname.match(ARTICLE_MD_PATH);
     if (mdMatch) {
-      return proxyArticleMarkdownRequest(env, ctx, mdMatch[1], cacheKeyFor(pathname, search, request.url));
+      return proxyMarkdownRequest(ctx, cacheKeyFor(pathname, search, request.url), () =>
+        fetchArticleMarkdown(env, mdMatch[1]),
+      );
+    }
+    if (pathname === ARTICLES_MARKDOWN_PATH) {
+      return proxyMarkdownRequest(ctx, cacheKeyFor(pathname, search, request.url), () => fetchArticlesMarkdown(env));
     }
 
     // Routes mirror the API's exactly: /articles and /articles/{slug}. Only

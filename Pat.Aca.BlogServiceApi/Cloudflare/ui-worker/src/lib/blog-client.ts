@@ -76,6 +76,27 @@ export async function getArticleMarkdown(env: Env, slug: string): Promise<string
   return response.text();
 }
 
+/** One listed article with its raw Markdown `content`, as api-proxy's
+ * /articles-markdown returns it. */
+export interface ArticleMarkdown {
+  slug: string;
+  title: string;
+  summary: string;
+  publishedAt: string;
+  tags: string[];
+  content: string;
+}
+
+/** Fetches every listed article's raw Markdown in one call, newest-first,
+ * for /llms-full.txt. */
+export async function getArticlesMarkdown(env: Env): Promise<ArticleMarkdown[]> {
+  const response = await fetchFromProxy(env, '/articles-markdown');
+  if (!response.ok) {
+    throw new UpstreamError(`GET /articles-markdown failed with status ${response.status}`);
+  }
+  return response.json();
+}
+
 /** Fetches an article's published comments. Unlike every other fetch in
  * this file, a failure here returns an empty list rather than throwing —
  * comments are supplementary to the article itself (same "a side effect

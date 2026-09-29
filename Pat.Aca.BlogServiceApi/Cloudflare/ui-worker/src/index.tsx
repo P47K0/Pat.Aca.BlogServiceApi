@@ -2,7 +2,15 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Article, Env } from './types';
 import { UpstreamError } from './types';
-import { getArticleBySlug, getArticleMarkdown, getArticles, getArticlesPage, getComments, postComment } from './lib/blog-client';
+import {
+  getArticleBySlug,
+  getArticleMarkdown,
+  getArticles,
+  getArticlesMarkdown,
+  getArticlesPage,
+  getComments,
+  postComment,
+} from './lib/blog-client';
 import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles';
 import { searchAssistant, resolveSearchResults } from './lib/search-client';
 import { verifyTurnstile } from './lib/turnstile';
@@ -369,11 +377,50 @@ app.get('/llms.txt', async (c) => {
     '',
     '## Optional',
     '',
+    `- [Full text](${siteUrl}/llms-full.txt): every article's Markdown in one file`,
     `- [RSS feed](${siteUrl}/feed.xml)`,
     `- [Sitemap](${siteUrl}/sitemap.xml)`,
     '',
   ].join('\n');
   return c.body(body, 200, { 'Content-Type': 'text/plain; charset=utf-8' });
+});
+
+// llms-full.txt: the companion to llms.txt above, with every article's full
+// Markdown in one file (newest first) instead of links, for agents that want
+// the whole blog in one fetch. The about/CV document comes first. Articles
+// come from api-proxy's /articles-markdown in a single call: one .md fetch
+// per article would run past the Workers subrequest limit. `noindex` for the
+// same reason as /about.md: it duplicates every article page, and AI
+// crawlers don't act on it.
+app.get('/llms-full.txt', async (c) => {
+  const [articles, about] = await Promise.all([getArticlesMarkdown(c.env), getArticleMarkdown(c.env, 'about')]);
+  const siteUrl = c.env.SITE_URL;
+  const articleSections = articles.map((article) =>
+    [
+      '---',
+      '',
+      `Source: ${siteUrl}/articles/${article.slug}.md`,
+      `Published: ${article.publishedAt.slice(0, 10)}`,
+      ...(article.tags.length > 0 ? [`Tags: ${article.tags.join(', ')}`] : []),
+      '',
+      article.content.trim(),
+      '',
+    ].join('\n'),
+  );
+  const body = [
+    `# koorevaar.com Blog: full text`,
+    '',
+    `> ${SITE_AUTHOR.name}'s blog: notes and write-ups on Azure, Kubernetes, DevOps and live LLM side projects.`,
+    '',
+    `Every article's full Markdown, newest first. The index with links only is ${siteUrl}/llms.txt. All articles are co-authored with Claude.`,
+    '',
+    ...(about === null ? [] : ['---', '', `Source: ${siteUrl}/about.md`, '', about.trim(), '']),
+    ...articleSections,
+  ].join('\n');
+  return c.body(body, 200, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'X-Robots-Tag': 'noindex',
+  });
 });
 
 app.notFound((c) =>
