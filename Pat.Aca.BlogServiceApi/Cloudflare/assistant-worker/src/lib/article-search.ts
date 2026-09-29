@@ -26,6 +26,15 @@ const CANDIDATE_POOL_SIZE = 40;
 // historical cleanup, so this filter needs to stay regardless.
 const EXCLUDED_CHUNK_TEXT = '*Co-authored with Claude.*';
 
+// The Unlisted `about` article (the CV behind /about.md) is embedded like
+// any other article so /ask can answer from it, but it's not a search
+// result: Unlisted means it never shows in the article list, and search
+// shouldn't be a back door into it. It has ~100 paragraph chunks covering
+// every topic the blog touches, so, like the byline above, it's excluded in
+// the Cosmos query itself; a post-fetch filter could leave the candidate
+// pool mostly empty.
+const EXCLUDED_SLUG = 'about';
+
 export interface ArticleSearchResult {
   sourceSlug: string;
   score: number;
@@ -43,7 +52,13 @@ export interface ArticleSearchResult {
  * responsible for resolving sourceSlug to an actual article for display --
  * KnowledgeBase chunks don't carry a title, only sourceSlug. */
 export async function searchArticles(env: Env, embedding: number[], limit: number): Promise<ArticleSearchResult[]> {
-  const candidates = await retrieveArticleChunkCandidates(env, embedding, CANDIDATE_POOL_SIZE, EXCLUDED_CHUNK_TEXT);
+  const candidates = await retrieveArticleChunkCandidates(
+    env,
+    embedding,
+    CANDIDATE_POOL_SIZE,
+    EXCLUDED_CHUNK_TEXT,
+    EXCLUDED_SLUG,
+  );
 
   const bestScoreBySlug = new Map<string, number>();
   for (const chunk of candidates) {

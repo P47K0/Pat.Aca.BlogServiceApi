@@ -89,22 +89,32 @@ export interface KnowledgeBaseChunk {
  * — a client-side post-filter would just leave zero real candidates behind
  * to rank. retrieveChunks (used by /ask) never passes this, since an
  * irrelevant chunk reaching generation there is far less harmful than one
- * silently dominating a ranked results list. */
+ * silently dominating a ranked results list.
+ *
+ * `excludeSlug`, when given, likewise adds `c.sourceSlug != @excludeSlug`,
+ * for the same reason: see article-search.ts's EXCLUDED_SLUG. */
 async function queryPartition(
   env: Env,
   sourceType: SourceType,
   embedding: number[],
   topK: number,
   excludeText?: string,
+  excludeSlug?: string,
 ): Promise<KnowledgeBaseChunk[]> {
   const token = await getAccessToken(env);
   const url = `https://${env.COSMOS_ACCOUNT_NAME}.documents.azure.com/dbs/${DATABASE_NAME}/colls/${CONTAINER_NAME}/docs`;
 
-  const whereClause = excludeText ? 'WHERE c.text != @excludeText ' : '';
+  const conditions: string[] = [];
   const parameters: { name: string; value: number[] | string }[] = [{ name: '@embedding', value: embedding }];
   if (excludeText) {
+    conditions.push('c.text != @excludeText');
     parameters.push({ name: '@excludeText', value: excludeText });
   }
+  if (excludeSlug) {
+    conditions.push('c.sourceSlug != @excludeSlug');
+    parameters.push({ name: '@excludeSlug', value: excludeSlug });
+  }
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')} ` : '';
 
   const response = await fetch(url, {
     method: 'POST',
@@ -197,8 +207,9 @@ export async function retrieveArticleChunkCandidates(
   embedding: number[],
   candidatePoolSize: number,
   excludeText?: string,
+  excludeSlug?: string,
 ): Promise<KnowledgeBaseChunk[]> {
-  return queryPartition(env, 'article', embedding, candidatePoolSize, excludeText);
+  return queryPartition(env, 'article', embedding, candidatePoolSize, excludeText, excludeSlug);
 }
 
 /** Counts documents in one partition — same one-partition-at-a-time
