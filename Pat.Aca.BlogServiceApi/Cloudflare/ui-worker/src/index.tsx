@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Article, Env } from './types';
 import { UpstreamError } from './types';
-import { getArticleBySlug, getArticleMarkdown, getArticles, getArticlesPage, getComments, postComment } from './lib/blog-client';
+import { getArticleBySlug, getArticleMarkdown, getArticles, getArticlesPage, getArticlesWithCompleteness, getComments, postComment } from './lib/blog-client';
 import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles';
 import { searchAssistant, resolveSearchResults } from './lib/search-client';
 import { verifyTurnstile } from './lib/turnstile';
@@ -297,8 +297,19 @@ app.get('/robots.txt', (c) =>
 // Lets search engines discover every article without waiting on crawl-only
 // link discovery — built straight from the same getArticles() list the home
 // page already fetches, no new data needed.
+//
+// When api-proxy could only offer its latest-10 snapshot, answer 503 instead
+// of a 10-URL sitemap: a crawler keeps its last good copy and retries, while
+// a short sitemap reads as "the other articles are gone". The background
+// origin fetch api-proxy started refills its cache well within Retry-After.
 app.get('/sitemap.xml', async (c) => {
-  const articles = await getArticles(c.env);
+  const { articles, partial } = await getArticlesWithCompleteness(c.env);
+  if (partial) {
+    return c.text('Sitemap temporarily unavailable, retry shortly.\n', 503, {
+      'Retry-After': '120',
+      'Cache-Control': 'no-store',
+    });
+  }
   const urls = [
     { loc: `${c.env.SITE_URL}/` },
     ...articles.map((article) => ({
