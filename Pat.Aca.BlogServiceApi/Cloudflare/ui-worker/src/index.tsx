@@ -214,13 +214,18 @@ app.get('/articles/:slug', async (c) => {
 // the fixed "about" slug —
 // a CV-like document (skills, certs, side projects) stored as one more
 // (Unlisted) article, doubling as an llms.txt-style resource for AI
-// crawlers/recruiter-assistants.
+// crawlers/recruiter-assistants. `noindex` keeps the raw Markdown out of
+// search engine results (it would duplicate the homepage CV); AI crawlers
+// don't act on it, so it doesn't get in the way of that second role.
 app.get('/about.md', async (c) => {
   const markdown = await getArticleMarkdown(c.env, 'about');
   if (markdown === null) {
     return c.notFound();
   }
-  return c.body(markdown, 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+  return c.body(markdown, 200, {
+    'Content-Type': 'text/markdown; charset=utf-8',
+    'X-Robots-Tag': 'noindex',
+  });
 });
 
 // The comment form (CommentSection.tsx) posts here as a plain HTML form
