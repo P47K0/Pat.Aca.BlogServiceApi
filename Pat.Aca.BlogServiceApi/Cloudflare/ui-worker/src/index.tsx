@@ -294,6 +294,16 @@ app.get('/robots.txt', (c) =>
   c.text(`User-agent: *\nAllow: /\nSitemap: ${c.env.SITE_URL}/sitemap.xml\n`),
 );
 
+// Bing Webmaster Tools ownership check. The code is per Bing account, not a
+// secret, and the same one www.koorevaar.com serves. Keep it: Bing re-checks.
+app.get('/BingSiteAuth.xml', (c) =>
+  c.body(
+    '<?xml version="1.0"?>\n<users>\n\t<user>0C8FD1A151E39E0C013A9490F4CD1733</user>\n</users>\n',
+    200,
+    { 'Content-Type': 'application/xml; charset=utf-8' },
+  ),
+);
+
 // Lets search engines discover every article without waiting on crawl-only
 // link discovery — built straight from the same getArticles() list the home
 // page already fetches, no new data needed.
