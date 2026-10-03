@@ -7,6 +7,7 @@ import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles
 import { searchAssistant, resolveSearchResults } from './lib/search-client';
 import { verifyTurnstile } from './lib/turnstile';
 import { escapeXml } from './lib/xml';
+import { estimateSubscribers, recordFeedFetch } from './lib/feed-analytics';
 import { Layout, SITE_AUTHOR } from './components/Layout';
 import { ArticlesFragment } from './components/ArticlesFragment';
 import { HomePage, LOAD_MORE_PAGE_SIZE } from './pages/Home';
@@ -362,10 +363,35 @@ app.get('/sitemap.xml', async (c) => {
   return c.body(body, 200, { 'Content-Type': 'application/xml; charset=UTF-8' });
 });
 
+// Estimated RSS subscriber count, for the homepage's stat tile (fetched
+// server-side by the website worker's /api/feed-subscribers). Cached for an
+// hour per colo so homepage visits don't each run an Analytics Engine query.
+const FEED_SUBSCRIBERS_TTL_SECONDS = 3600;
+app.get('/feed-subscribers.json', async (c) => {
+  const cacheKey = new Request(new URL('/feed-subscribers.json', c.req.url).toString());
+  const cached = await caches.default.match(cacheKey);
+  if (cached) return cached;
+
+  let count = 0;
+  if (c.env.CF_ACCOUNT_ID && c.env.CF_ANALYTICS_TOKEN) {
+    try {
+      count = await estimateSubscribers(c.env.CF_ACCOUNT_ID, c.env.CF_ANALYTICS_TOKEN);
+    } catch (err) {
+      console.error('feed-subscribers', err);
+      return c.json({ count: 0 }, 200, { 'Cache-Control': 'no-store' });
+    }
+  }
+  const response = c.json({ count }, 200, { 'Cache-Control': `public, max-age=${FEED_SUBSCRIBERS_TTL_SECONDS}` });
+  c.executionCtx.waitUntil(caches.default.put(cacheKey, response.clone()));
+  return response;
+});
+
 // Plain RSS 2.0 feed, most-recent-first (getArticles() is already sorted that
 // way). Uses `summary` per item, not the full rendered `content` — keeps the
 // feed small and avoids re-escaping already-rendered HTML inside XML.
 app.get('/feed.xml', async (c) => {
+  // Logged off the response path; a failed write never breaks the feed.
+  c.executionCtx.waitUntil(recordFeedFetch(c.env.FEED_ANALYTICS, c.req.raw).catch((err) => console.error('feed analytics', err)));
   const articles = await getArticles(c.env);
   const siteUrl = c.env.SITE_URL;
   const items = articles
