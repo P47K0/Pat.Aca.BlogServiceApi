@@ -132,7 +132,27 @@ app.get('/articles/:slugWithMd{.+\\.md}', async (c) => {
   return c.body(markdown, 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
 });
 
+// Content negotiation on the article URL itself: an agent sending
+// `Accept: text/markdown` gets the same raw Markdown as the .md route above.
+// Our free alternative to Cloudflare's "Markdown for Agents" (Pro plan only),
+// and better than converted HTML, since the Markdown is the article's own
+// source. Browsers never send text/markdown, so they always get HTML. Both
+// variants carry `Vary: Accept` so a cache can't serve one in place of the
+// other.
+function wantsMarkdown(acceptHeader: string | undefined): boolean {
+  return Boolean(acceptHeader?.toLowerCase().includes('text/markdown'));
+}
+
 app.get('/articles/:slug', async (c) => {
+  c.header('Vary', 'Accept');
+  if (wantsMarkdown(c.req.header('Accept'))) {
+    const markdown = await getArticleMarkdown(c.env, c.req.param('slug'));
+    if (markdown === null) {
+      return c.notFound();
+    }
+    return c.body(markdown, 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+  }
+
   const article = await getArticleBySlug(c.env, c.req.param('slug'));
   if (!article) {
     return c.notFound();
