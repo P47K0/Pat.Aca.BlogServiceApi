@@ -7,6 +7,8 @@
  *   e.g. "Feedly/1.0 (+http://www.feedly.com/fetcher.html; 12 subscribers)".
  * - reader: anything else polling the feed, roughly one subscriber per
  *   distinct visitor (self-hosted FreshRSS, NetNewsWire, Thunderbird, ...).
+ * - browser: a plain web browser opening the feed (a User-Agent with only
+ *   browser tokens, such as Chrome or iOS Safari); a visit, not a subscriber.
  * - crawler: search engines, link previews, uptime checks; not subscribers.
  *
  * Layout: index1 = kind, blob1 = kind, blob2 = reader name, blob3 = visitor
@@ -20,19 +22,34 @@ const SUBSCRIBERS_PATTERN = /(\d+)\s+(?:subscribers?|readers?)\b/i;
 const CRAWLER_PATTERN =
   /bot\b|bot\/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl\/|wget\/|python-|go-http-client|okhttp/i;
 
-type FeedFetchKind = 'aggregator' | 'reader' | 'crawler';
+type FeedFetchKind = 'aggregator' | 'reader' | 'browser' | 'crawler';
 
-const BROWSER_TOKENS = new Set(['Mozilla', 'AppleWebKit', 'KHTML', 'Gecko', 'Chrome', 'Safari', 'Version', 'Firefox']);
+/** Product tokens of mainstream browsers, including the extra ones Edge,
+ * Opera, Samsung Internet and the iOS browsers add ("Mobile/15E148"). */
+const BROWSER_TOKENS = new Set([
+  'Mozilla', 'AppleWebKit', 'KHTML', 'Gecko', 'Chrome', 'Chromium', 'Safari', 'Version', 'Firefox', 'Mobile',
+  'Edg', 'EdgA', 'EdgiOS', 'OPR', 'SamsungBrowser', 'CriOS', 'FxiOS', 'YaBrowser', 'Vivaldi',
+]);
+
+function productTokens(userAgent: string): string[] {
+  return [...userAgent.matchAll(/(?<![\w.\/-])([A-Za-z][\w.-]*)\/\d/g)].map((m) => m[1]);
+}
 
 /** First non-browser product token of a User-Agent: "Feedly/1.0 (...)" ->
  * "Feedly", "Mozilla/5.0 (compatible; Inoreader/1.0; ...)" -> "Inoreader".
  * Falls back to the first word ("NewsBlur Feed Fetcher - ..."). */
 function readerName(userAgent: string): string {
-  const product = [...userAgent.matchAll(/(?<![\w.\/-])([A-Za-z][\w.-]*)\/\d/g)]
-    .map((m) => m[1])
-    .find((token) => !BROWSER_TOKENS.has(token));
+  const product = productTokens(userAgent).find((token) => !BROWSER_TOKENS.has(token));
   const name = product ?? userAgent.trim().split(/[\/\s(;]/)[0];
   return (name || 'unknown').slice(0, 64);
+}
+
+/** True for a User-Agent that names nothing but browser tokens. Feed readers
+ * that send a browser-like User-Agent add their own name ("Inoreader/1.0")
+ * or a subscriber count, so they still count. */
+export function isPlainBrowser(userAgent: string): boolean {
+  const tokens = productTokens(userAgent);
+  return tokens.length > 0 && tokens.every((token) => BROWSER_TOKENS.has(token));
 }
 
 async function visitorHash(day: string, ip: string, userAgent: string): Promise<string> {
@@ -45,7 +62,13 @@ export async function recordFeedFetch(dataset: AnalyticsEngineDataset, request: 
   const ip = request.headers.get('CF-Connecting-IP') ?? '';
   const subscribers = Number(SUBSCRIBERS_PATTERN.exec(userAgent)?.[1] ?? 0);
   const kind: FeedFetchKind =
-    subscribers > 0 ? 'aggregator' : CRAWLER_PATTERN.test(userAgent) || userAgent === '' ? 'crawler' : 'reader';
+    subscribers > 0
+      ? 'aggregator'
+      : CRAWLER_PATTERN.test(userAgent) || userAgent === ''
+        ? 'crawler'
+        : isPlainBrowser(userAgent)
+          ? 'browser'
+          : 'reader';
   const day = new Date().toISOString().slice(0, 10);
 
   dataset.writeDataPoint({
@@ -72,12 +95,16 @@ export interface DailyEstimate {
 }
 
 /** Estimated subscribers per UTC day, oldest first: per aggregator the
- * highest count it reported that day, plus one per distinct non-crawler
- * visitor. Same logic as tools/feed-subscribers/feed_subscribers.py. */
+ * highest count it reported that day, plus one per distinct reader visitor.
+ * Browsers and crawlers do not count. Rows written before the browser kind
+ * existed are kind reader with a browser token as reader name ("Mozilla"),
+ * so those are skipped too. Same logic as
+ * tools/feed-subscribers/feed_subscribers.py. */
 export function dailyEstimates(rows: FeedFetchRow[]): DailyEstimate[] {
   const days = new Map<string, Record<string, number>>();
   for (const row of rows) {
-    if (row.kind === 'crawler') continue;
+    if (row.kind !== 'aggregator' && row.kind !== 'reader') continue;
+    if (row.kind === 'reader' && BROWSER_TOKENS.has(row.reader)) continue;
     const day = row.day.slice(0, 10);
     const readers = days.get(day) ?? {};
     readers[row.reader] =
@@ -102,7 +129,7 @@ export async function estimateSubscribers(accountId: string, apiToken: string): 
            blob1 AS kind, blob2 AS reader, blob3 AS visitor,
            max(double1) AS subscribers
     FROM rss_feed_fetches
-    WHERE timestamp > NOW() - INTERVAL '7' DAY AND blob1 != 'crawler'
+    WHERE timestamp > NOW() - INTERVAL '7' DAY AND blob1 IN ('aggregator', 'reader')
     GROUP BY day, kind, reader, visitor`;
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`, {
     method: 'POST',

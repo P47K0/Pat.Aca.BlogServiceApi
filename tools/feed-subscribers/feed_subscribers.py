@@ -7,8 +7,8 @@ the `rss_feed_fetches` Analytics Engine dataset the ui-worker writes on every
 CF_API_TOKEN needs the "Account Analytics: Read" permission. `days` defaults to 7.
 
 Per UTC day: hosted aggregators count with the subscriber number from their
-User-Agent (highest seen that day per aggregator), every other non-crawler
-visitor counts as one. It is an estimate: readers that poll less than once a
+User-Agent (highest seen that day per aggregator), every feed reader visitor
+counts as one. Plain browsers opening the feed and crawlers do not count. It is an estimate: readers that poll less than once a
 day are missed on the days they don't poll, and two people behind one IP with
 the same reader app count as one. The homepage tile (ui-worker's
 /feed-subscribers.json) shows the highest daily total of the last 7 days.
@@ -20,6 +20,13 @@ import urllib.request
 from collections import defaultdict
 
 DATASET = "rss_feed_fetches"
+
+# Same set as BROWSER_TOKENS in feed-analytics.ts. Rows written before the
+# browser kind existed are kind "reader" with one of these as reader name.
+BROWSER_TOKENS = {
+    "Mozilla", "AppleWebKit", "KHTML", "Gecko", "Chrome", "Chromium", "Safari", "Version", "Firefox", "Mobile",
+    "Edg", "EdgA", "EdgiOS", "OPR", "SamsungBrowser", "CriOS", "FxiOS", "YaBrowser", "Vivaldi",
+}
 
 
 def query(sql):
@@ -40,7 +47,7 @@ def main():
                blob1 AS kind, blob2 AS reader, blob3 AS visitor,
                max(double1) AS subscribers
         FROM {DATASET}
-        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob1 != 'crawler'
+        WHERE timestamp > NOW() - INTERVAL '{days}' DAY AND blob1 IN ('aggregator', 'reader')
         GROUP BY day, kind, reader, visitor
         ORDER BY day
     """)
@@ -52,7 +59,7 @@ def main():
         if row["kind"] == "aggregator":
             current = aggregators[day].get(row["reader"], 0)
             aggregators[day][row["reader"]] = max(current, int(float(row["subscribers"])))
-        else:
+        elif row["reader"] not in BROWSER_TOKENS:
             readers[day][row["reader"]] += 1
 
     all_days = sorted(set(aggregators) | set(readers))
