@@ -7,7 +7,7 @@ import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles
 import { searchAssistant, resolveSearchResults } from './lib/search-client';
 import { verifyTurnstile } from './lib/turnstile';
 import { escapeXml } from './lib/xml';
-import { estimateSubscribers, recordFeedFetch } from './lib/feed-analytics';
+import { estimateSubscribers, recordFeedFetch, type DailyEstimate } from './lib/feed-analytics';
 import { Layout, SITE_AUTHOR } from './components/Layout';
 import { ArticlesFragment } from './components/ArticlesFragment';
 import { HomePage, LOAD_MORE_PAGE_SIZE } from './pages/Home';
@@ -364,24 +364,30 @@ app.get('/sitemap.xml', async (c) => {
 });
 
 // Estimated RSS subscriber count, for the homepage's stat tile (fetched
-// server-side by the website worker's /api/feed-subscribers). Cached for an
-// hour per colo so homepage visits don't each run an Analytics Engine query.
+// server-side by the website worker's /api/feed-subscribers). With
+// ?detail=1 it also lists the last 7 days per reader, for checking the
+// number in a browser. Cached for an hour per colo (per variant) so homepage
+// visits don't each run an Analytics Engine query.
 const FEED_SUBSCRIBERS_TTL_SECONDS = 3600;
 app.get('/feed-subscribers.json', async (c) => {
-  const cacheKey = new Request(new URL('/feed-subscribers.json', c.req.url).toString());
+  const detail = c.req.query('detail') === '1';
+  const cacheKey = new Request(new URL(`/feed-subscribers.json${detail ? '?detail=1' : ''}`, c.req.url).toString());
   const cached = await caches.default.match(cacheKey);
   if (cached) return cached;
 
-  let count = 0;
+  let days: DailyEstimate[] = [];
   if (c.env.CF_ACCOUNT_ID && c.env.CF_ANALYTICS_TOKEN) {
     try {
-      count = await estimateSubscribers(c.env.CF_ACCOUNT_ID, c.env.CF_ANALYTICS_TOKEN);
+      days = await estimateSubscribers(c.env.CF_ACCOUNT_ID, c.env.CF_ANALYTICS_TOKEN);
     } catch (err) {
       console.error('feed-subscribers', err);
       return c.json({ count: 0 }, 200, { 'Cache-Control': 'no-store' });
     }
   }
-  const response = c.json({ count }, 200, { 'Cache-Control': `public, max-age=${FEED_SUBSCRIBERS_TTL_SECONDS}` });
+  const count = Math.max(0, ...days.map((d) => d.total));
+  const response = c.json(detail ? { count, days } : { count }, 200, {
+    'Cache-Control': `public, max-age=${FEED_SUBSCRIBERS_TTL_SECONDS}`,
+  });
   c.executionCtx.waitUntil(caches.default.put(cacheKey, response.clone()));
   return response;
 });

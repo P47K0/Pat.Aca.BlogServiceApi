@@ -63,37 +63,40 @@ interface FeedFetchRow {
   subscribers: number | string;
 }
 
-/** Estimated subscribers per UTC day: per aggregator the highest count it
- * reported that day, plus one per distinct non-crawler visitor. Same logic
- * as tools/feed-subscribers/feed_subscribers.py, which also prints the
- * per-reader breakdown. */
-export function dailyEstimates(rows: FeedFetchRow[]): Map<string, number> {
-  const aggregators = new Map<string, Map<string, number>>();
-  const visitors = new Map<string, number>();
-  for (const row of rows) {
-    const day = row.day.slice(0, 10);
-    if (row.kind === 'aggregator') {
-      const perReader = aggregators.get(day) ?? new Map<string, number>();
-      perReader.set(row.reader, Math.max(perReader.get(row.reader) ?? 0, Number(row.subscribers)));
-      aggregators.set(day, perReader);
-    } else if (row.kind === 'reader') {
-      visitors.set(day, (visitors.get(day) ?? 0) + 1);
-    }
-  }
-  const totals = new Map<string, number>();
-  for (const day of new Set([...aggregators.keys(), ...visitors.keys()])) {
-    const fromAggregators = [...(aggregators.get(day)?.values() ?? [])].reduce((a, b) => a + b, 0);
-    totals.set(day, fromAggregators + (visitors.get(day) ?? 0));
-  }
-  return totals;
+/** One UTC day of the estimate: the total, and what each reader added to it
+ * (an aggregator's reported count, or a self-polling reader's visitors). */
+export interface DailyEstimate {
+  day: string;
+  total: number;
+  readers: Record<string, number>;
 }
 
-/** The public subscriber count: the highest daily estimate of the last 7
- * days. A single day undercounts readers that poll less than daily, and the
+/** Estimated subscribers per UTC day, oldest first: per aggregator the
+ * highest count it reported that day, plus one per distinct non-crawler
+ * visitor. Same logic as tools/feed-subscribers/feed_subscribers.py. */
+export function dailyEstimates(rows: FeedFetchRow[]): DailyEstimate[] {
+  const days = new Map<string, Record<string, number>>();
+  for (const row of rows) {
+    if (row.kind === 'crawler') continue;
+    const day = row.day.slice(0, 10);
+    const readers = days.get(day) ?? {};
+    readers[row.reader] =
+      row.kind === 'aggregator'
+        ? Math.max(readers[row.reader] ?? 0, Number(row.subscribers))
+        : (readers[row.reader] ?? 0) + 1;
+    days.set(day, readers);
+  }
+  return [...days.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, readers]) => ({ day, total: Object.values(readers).reduce((a, b) => a + b, 0), readers }));
+}
+
+/** The last 7 days of estimates. The public count is the highest daily
+ * total: a single day undercounts readers that poll less than daily, and the
  * current day is still incomplete. Analytics Engine has no Worker-side read
  * binding, so this goes through the SQL API with an "Account Analytics:
  * Read" token. */
-export async function estimateSubscribers(accountId: string, apiToken: string): Promise<number> {
+export async function estimateSubscribers(accountId: string, apiToken: string): Promise<DailyEstimate[]> {
   const sql = `
     SELECT toStartOfInterval(timestamp, INTERVAL '1' DAY) AS day,
            blob1 AS kind, blob2 AS reader, blob3 AS visitor,
@@ -108,5 +111,5 @@ export async function estimateSubscribers(accountId: string, apiToken: string): 
   });
   if (!res.ok) throw new Error(`Analytics Engine SQL responded ${res.status}: ${await res.text()}`);
   const { data } = (await res.json()) as { data: FeedFetchRow[] };
-  return Math.max(0, ...dailyEstimates(data).values());
+  return dailyEstimates(data);
 }
