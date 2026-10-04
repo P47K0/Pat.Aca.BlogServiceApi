@@ -28,6 +28,16 @@ export interface Env {
    * own SEARCH_SECRET, mirroring how ARTICLES_API_KEY is the identical
    * value/name on both api-proxy and blog-service-api. */
   SEARCH_SECRET: string;
+  /** Analytics Engine dataset `rss_feed_fetches`: one data point per
+   * /feed.xml fetch, for the RSS subscriber estimate (see
+   * lib/feed-analytics.ts). Binding in wrangler.toml. */
+  FEED_ANALYTICS: AnalyticsEngineDataset;
+  /** Cloudflare account id and an "Account Analytics: Read" API token, for
+   * reading rss_feed_fetches back via the Analytics Engine SQL API (GET
+   * /feed-subscribers.json). Both set via `wrangler secret put`; unset means
+   * the endpoint reports 0. */
+  CF_ACCOUNT_ID?: string;
+  CF_ANALYTICS_TOKEN?: string;
 }
 
 /** Shape returned by api-proxy's GET /articles/{slug}/comments — mirrors

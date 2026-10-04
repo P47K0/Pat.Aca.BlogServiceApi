@@ -53,3 +53,11 @@ ASSISTANT_WORKER_BASE_URL = "https://ai-assistant.koorevaar.com"
 # shows what happens after you start watching.
 [observability]
 enabled = true
+
+# One data point per /feed.xml fetch (reader, reported subscriber count,
+# hashed visitor), read back by tools/feed-subscribers for the RSS
+# subscriber estimate. Analytics Engine, not KV: KV's free-tier writes are
+# shared with the restaurant sites, Analytics Engine has its own free quota.
+[[analytics_engine_datasets]]
+binding = "FEED_ANALYTICS"
+dataset = "rss_feed_fetches"
