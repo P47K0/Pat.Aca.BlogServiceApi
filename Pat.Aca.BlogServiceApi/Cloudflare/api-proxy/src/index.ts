@@ -143,8 +143,11 @@ interface Article {
 /** The one footer shown under every listed article, in Markdown. It lives
  * here rather than in each article's `content`, where it would be embedded
  * into the KnowledgeBase as its own chunk on every article. Text specific
- * to one article belongs at the end of that article's `content`. */
-const ARTICLE_FOOTER = '*Co-authored with Claude.*';
+ * to one article belongs at the end of that article's `content`. The Ko-fi
+ * line has the same wording as the one parts 9 and 10 of the AI chat
+ * assistant series had at the end of their own `content`. */
+const ARTICLE_FOOTER =
+  '*Co-authored with Claude.*\n\nIf this was useful, [you can buy me a coffee](https://ko-fi.com/p47k0).';
 
 /** Every article's Markdown source conventionally opens with a `# Title`
  * line mirroring `article.title` — but ArticleDetailPage (ui-worker) already
