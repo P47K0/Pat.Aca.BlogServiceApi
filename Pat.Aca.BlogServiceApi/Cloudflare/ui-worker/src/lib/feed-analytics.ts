@@ -9,7 +9,9 @@
  *   distinct visitor (self-hosted FreshRSS, NetNewsWire, Thunderbird, ...).
  * - browser: a plain web browser opening the feed (a User-Agent with only
  *   browser tokens, such as Chrome or iOS Safari); a visit, not a subscriber.
- * - crawler: search engines, link previews, uptime checks; not subscribers.
+ * - crawler: search engines, link previews, uptime checks, the WebSub hub
+ *   (it fetches the feed after each ping, for the readers subscribed to it);
+ *   not subscribers.
  *
  * Layout: index1 = kind, blob1 = kind, blob2 = reader name, blob3 = visitor
  * hash, double1 = reported subscribers (0 when the User-Agent has none).
@@ -20,7 +22,7 @@
 
 const SUBSCRIBERS_PATTERN = /(\d+)\s+(?:subscribers?|readers?)\b/i;
 const CRAWLER_PATTERN =
-  /bot\b|bot\/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl\/|wget\/|python-|go-http-client|okhttp/i;
+  /bot\b|bot\/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl\/|wget\/|python-|go-http-client|okhttp|pubsubhubbub/i;
 
 type FeedFetchKind = 'aggregator' | 'reader' | 'browser' | 'crawler';
 

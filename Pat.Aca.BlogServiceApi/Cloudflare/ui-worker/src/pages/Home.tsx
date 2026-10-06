@@ -29,6 +29,13 @@ export const HomePage: FC<{ articles: Article[] }> = ({ articles }) => {
   return (
     <>
       <TagCloud articles={articles} />
+      {/* Infinite scroll means few readers ever reach the footer's RSS link. */}
+      <p class="mb-6 text-sm text-gray-500">
+        New articles:{' '}
+        <a href="/feed.xml" class="text-blue-600 hover:underline">
+          follow via RSS
+        </a>
+      </p>
       {visible.length === 0 ? (
         <p class="text-gray-500">No articles yet.</p>
       ) : (

@@ -147,7 +147,8 @@ interface Article {
  * line has the same wording as the one parts 9 and 10 of the AI chat
  * assistant series had at the end of their own `content`. */
 const ARTICLE_FOOTER =
-  '*Co-authored with Claude.*\n\nIf this was useful, [you can buy me a coffee](https://ko-fi.com/p47k0).';
+  '*Co-authored with Claude.*\n\nIf this was useful, [you can buy me a coffee](https://ko-fi.com/p47k0).\n\n' +
+  'New articles: [follow via RSS](https://blog.koorevaar.com/feed.xml).';
 
 /** Every article's Markdown source conventionally opens with a `# Title`
  * line mirroring `article.title` — but ArticleDetailPage (ui-worker) already
@@ -703,6 +704,34 @@ async function writeFallbackSnapshotFromArticles(env: Env, articles: Article[]):
 
   const snapshot: FallbackSnapshot = { writtenAt: Date.now(), articles: latest };
   await env.ARTICLES_FALLBACK.put(FALLBACK_KV_KEY, JSON.stringify(snapshot));
+  await notifyWebSubHub();
+}
+
+// ui-worker's /feed.xml declares this hub (rel="hub"), so feed readers that
+// support WebSub (Feedly, Inoreader) get new articles pushed within minutes
+// instead of on their next poll. The hub refetches the feed itself after a
+// ping. Pinged from writeFallbackSnapshotFromArticles because a changed
+// latest-10 snapshot is exactly "the feed's newest items changed", from
+// either producer: ArticleListSyncFunction's push, or an origin fetch that
+// notices a scheduled article going live.
+const WEBSUB_HUB_URL = 'https://pubsubhubbub.appspot.com/';
+const FEED_URL = 'https://blog.koorevaar.com/feed.xml';
+
+/** Best-effort: a failed ping only means readers wait for their next poll,
+ * so it never fails the snapshot write it follows. */
+async function notifyWebSubHub(): Promise<void> {
+  try {
+    const response = await fetch(WEBSUB_HUB_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ 'hub.mode': 'publish', 'hub.url': FEED_URL }).toString(),
+    });
+    if (!response.ok) {
+      console.warn('websub hub ping', response.status);
+    }
+  } catch (err) {
+    console.warn('websub hub ping', err);
+  }
 }
 
 async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<void> {
