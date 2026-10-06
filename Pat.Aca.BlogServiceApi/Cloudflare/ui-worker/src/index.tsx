@@ -412,14 +412,18 @@ app.get('/feed.xml', async (c) => {
   </item>`;
     })
     .join('\n');
+  // Newest article's date, not the request time: a feed that looks changed on
+  // every poll defeats readers' and caches' change detection.
+  const lastBuildDate = new Date(articles[0]?.publishedAt ?? Date.now()).toUTCString();
   const body = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>
   <title>koorevaar.com Blog</title>
+  <atom:link href="${siteUrl}/feed.xml" rel="self" type="application/rss+xml"/>
   <link>${siteUrl}/</link>
   <description>${escapeXml(SITE_DESCRIPTION)}</description>
   <language>en</language>
-  <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+  <lastBuildDate>${lastBuildDate}</lastBuildDate>
 ${items}
 </channel>
 </rss>
