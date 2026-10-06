@@ -392,6 +392,10 @@ app.get('/feed-subscribers.json', async (c) => {
   return response;
 });
 
+// WebSub hub readers subscribe through for push updates instead of polling.
+// api-proxy pings it when the article list changes (see notifyWebSubHub there).
+const WEBSUB_HUB_URL = 'https://pubsubhubbub.appspot.com/';
+
 // Plain RSS 2.0 feed, most-recent-first (getArticles() is already sorted that
 // way). Uses `summary` per item, not the full rendered `content` — keeps the
 // feed small and avoids re-escaping already-rendered HTML inside XML.
@@ -420,6 +424,7 @@ app.get('/feed.xml', async (c) => {
 <channel>
   <title>koorevaar.com Blog</title>
   <atom:link href="${siteUrl}/feed.xml" rel="self" type="application/rss+xml"/>
+  <atom:link href="${WEBSUB_HUB_URL}" rel="hub"/>
   <link>${siteUrl}/</link>
   <description>${escapeXml(SITE_DESCRIPTION)}</description>
   <language>en</language>
