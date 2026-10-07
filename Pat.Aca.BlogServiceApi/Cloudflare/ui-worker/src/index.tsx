@@ -33,7 +33,7 @@ const COMMENT_FLASH_COOKIE = 'comment_flash';
 // 404, error) — there's no per-site "tagline" field anywhere to derive this
 // from, so it's a plain constant. Tune the copy directly here.
 const SITE_DESCRIPTION =
-  "Patrick Koorevaar's portfolio and demo site — notes and write-ups on software and infrastructure projects.";
+  "Patrick Koorevaar's technical blog about software development and DevOps.";
 
 app.get('/', async (c) => {
   const articles = await getArticles(c.env);
