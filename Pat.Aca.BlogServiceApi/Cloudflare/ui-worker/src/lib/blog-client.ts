@@ -19,7 +19,7 @@ export async function getArticles(env: Env): Promise<Article[]> {
 export async function getArticlesWithCompleteness(env: Env): Promise<{ articles: Article[]; partial: boolean }> {
   const response = await fetchFromProxy(env, '/articles');
   if (!response.ok) {
-    throw new UpstreamError(`GET /articles failed with status ${response.status}`);
+    throw new UpstreamError(`GET /articles failed with status ${response.status}`, response.headers.get('Retry-After'));
   }
   return {
     articles: await response.json(),
@@ -46,7 +46,7 @@ export async function getArticlesPage(env: Env, limit: number, after: string | n
 
   const response = await fetchFromProxy(env, `/articles?${params.toString()}`);
   if (!response.ok) {
-    throw new UpstreamError(`GET /articles?${params.toString()} failed with status ${response.status}`);
+    throw new UpstreamError(`GET /articles?${params.toString()} failed with status ${response.status}`, response.headers.get('Retry-After'));
   }
 
   const articles = (await response.json()) as Article[];
@@ -65,7 +65,7 @@ export async function getArticleBySlug(env: Env, slug: string): Promise<Article 
     return null;
   }
   if (!response.ok) {
-    throw new UpstreamError(`GET /articles/${slug} failed with status ${response.status}`);
+    throw new UpstreamError(`GET /articles/${slug} failed with status ${response.status}`, response.headers.get('Retry-After'));
   }
   return response.json();
 }
@@ -82,7 +82,7 @@ export async function getArticleMarkdown(env: Env, slug: string): Promise<string
     return null;
   }
   if (!response.ok) {
-    throw new UpstreamError(`GET /articles/${slug}.md failed with status ${response.status}`);
+    throw new UpstreamError(`GET /articles/${slug}.md failed with status ${response.status}`, response.headers.get('Retry-After'));
   }
   return response.text();
 }

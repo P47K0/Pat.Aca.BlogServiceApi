@@ -97,5 +97,11 @@ export interface Article {
 
 /** Thrown when api-proxy returns a non-2xx/404 status or the fetch itself
  * fails; caught by index.tsx's onError handler and shown as a generic error
- * page rather than leaking upstream details to the visitor. */
-export class UpstreamError extends Error {}
+ * page rather than leaking upstream details to the visitor. retryAfter is
+ * the upstream Retry-After header (the API's rate limiter sets it on a 429),
+ * forwarded so the 503 tells crawlers when to come back. */
+export class UpstreamError extends Error {
+  constructor(message: string, readonly retryAfter: string | null = null) {
+    super(message);
+  }
+}
