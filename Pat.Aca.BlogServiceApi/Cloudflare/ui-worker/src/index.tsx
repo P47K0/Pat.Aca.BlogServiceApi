@@ -494,8 +494,24 @@ app.notFound((c) =>
 // Catches UpstreamError from blog-client (api-proxy unreachable or erroring)
 // and any other unexpected failure — shows a generic error page rather than
 // leaking upstream details to the visitor.
+//
+// An UpstreamError is transient (the API's shared 60/min read limit, an ACA
+// cold start), so it's a 503 with Retry-After and no noindex: crawlers retry
+// the URL later instead of reporting it as "Excluded by noindex". Anything
+// else is a bug in this Worker and keeps the 502 + noindex.
 app.onError((err, c) => {
-  console.error(err instanceof UpstreamError ? `Upstream failure: ${err.message}` : err);
+  if (err instanceof UpstreamError) {
+    console.error(`Upstream failure: ${err.message}`);
+    return c.html(
+      <Layout title="Error" description={SITE_DESCRIPTION} canonicalUrl={`${c.env.SITE_URL}${c.req.path}`}>
+        <ErrorPage />
+      </Layout>,
+      503,
+      { 'Retry-After': err.retryAfter ?? '60' },
+    );
+  }
+
+  console.error(err);
   return c.html(
     <Layout
       title="Error"
