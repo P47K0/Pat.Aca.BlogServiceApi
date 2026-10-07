@@ -9,9 +9,9 @@
  *   distinct visitor (self-hosted FreshRSS, NetNewsWire, Thunderbird, ...).
  * - browser: a plain web browser opening the feed (a User-Agent with only
  *   browser tokens, such as Chrome or iOS Safari); a visit, not a subscriber.
- * - crawler: search engines, link previews, uptime checks, the WebSub hub
- *   (it fetches the feed after each ping, for the readers subscribed to it);
- *   not subscribers.
+ * - crawler: search engines, link previews, uptime checks, feed validators,
+ *   the WebSub hub (it fetches the feed after each ping, for the readers
+ *   subscribed to it); not subscribers.
  *
  * Layout: index1 = kind, blob1 = kind, blob2 = reader name, blob3 = visitor
  * hash, double1 = reported subscribers (0 when the User-Agent has none).
@@ -22,7 +22,7 @@
 
 const SUBSCRIBERS_PATTERN = /(\d+)\s+(?:subscribers?|readers?)\b/i;
 const CRAWLER_PATTERN =
-  /bot\b|bot\/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl\/|wget\/|python-|go-http-client|okhttp|pubsubhubbub/i;
+  /bot\b|bot\/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl\/|wget\/|python-|go-http-client|okhttp|pubsubhubbub|validator/i;
 
 type FeedFetchKind = 'aggregator' | 'reader' | 'browser' | 'crawler';
 
@@ -100,13 +100,14 @@ export interface DailyEstimate {
  * highest count it reported that day, plus one per distinct reader visitor.
  * Browsers and crawlers do not count. Rows written before the browser kind
  * existed are kind reader with a browser token as reader name ("Mozilla"),
- * so those are skipped too. Same logic as
- * tools/feed-subscribers/feed_subscribers.py. */
+ * and rows written before a crawler was added to CRAWLER_PATTERN are kind
+ * reader named after it ("FeedValidator"), so those are skipped too. Same
+ * logic as tools/feed-subscribers/feed_subscribers.py. */
 export function dailyEstimates(rows: FeedFetchRow[]): DailyEstimate[] {
   const days = new Map<string, Record<string, number>>();
   for (const row of rows) {
     if (row.kind !== 'aggregator' && row.kind !== 'reader') continue;
-    if (row.kind === 'reader' && BROWSER_TOKENS.has(row.reader)) continue;
+    if (row.kind === 'reader' && (BROWSER_TOKENS.has(row.reader) || CRAWLER_PATTERN.test(row.reader))) continue;
     const day = row.day.slice(0, 10);
     const readers = days.get(day) ?? {};
     readers[row.reader] =

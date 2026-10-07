@@ -15,6 +15,7 @@ the same reader app count as one. The homepage tile (ui-worker's
 """
 import json
 import os
+import re
 import sys
 import urllib.request
 from collections import defaultdict
@@ -27,6 +28,13 @@ BROWSER_TOKENS = {
     "Mozilla", "AppleWebKit", "KHTML", "Gecko", "Chrome", "Chromium", "Safari", "Version", "Firefox", "Mobile",
     "Edg", "EdgA", "EdgiOS", "OPR", "SamsungBrowser", "CriOS", "FxiOS", "YaBrowser", "Vivaldi",
 }
+
+# Same as CRAWLER_PATTERN in feed-analytics.ts. Rows written before a crawler
+# was added there are kind "reader" named after it ("FeedValidator").
+CRAWLER_PATTERN = re.compile(
+    r"bot\b|bot/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl/|wget/|python-|go-http-client|okhttp|pubsubhubbub|validator",
+    re.I,
+)
 
 
 def query(sql):
@@ -59,7 +67,7 @@ def main():
         if row["kind"] == "aggregator":
             current = aggregators[day].get(row["reader"], 0)
             aggregators[day][row["reader"]] = max(current, int(float(row["subscribers"])))
-        elif row["reader"] not in BROWSER_TOKENS:
+        elif row["reader"] not in BROWSER_TOKENS and not CRAWLER_PATTERN.search(row["reader"]):
             readers[day][row["reader"]] += 1
 
     all_days = sorted(set(aggregators) | set(readers))
