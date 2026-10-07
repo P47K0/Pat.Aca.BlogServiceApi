@@ -107,13 +107,28 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
+    // Tells the caller when the window resets; ui-worker forwards it on its
+    // 503 so crawlers know when to retry.
+    options.OnRejected = (context, _) =>
+    {
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            context.HttpContext.Response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString();
+        }
+        return ValueTask.CompletedTask;
+    };
+
+    // 300/min, not 60: every reader and crawler shares the Worker's one API
+    // key, so a crawler walking the sitemap emptied a 60/min bucket and got
+    // error pages (Search Console "Excluded by noindex", 2026-10-07).
+    // Temporary relief until article detail reads come from KV instead.
     options.AddPolicy(ArticlesRateLimiterPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             ApiSecurity.GetRateLimitPartitionKey(httpContext),
-            factory: _ => ApiSecurity.CreateArticlesLimiterOptions(permitLimit: 60, window: TimeSpan.FromMinutes(1))));
+            factory: _ => ApiSecurity.CreateArticlesLimiterOptions(permitLimit: 300, window: TimeSpan.FromMinutes(1))));
 
     // A separate, tighter policy for the write endpoints — well below the
-    // read path's 60/min, since there's exactly one legitimate caller
+    // read path's 300/min, since there's exactly one legitimate caller
     // (Claude, via the client-credentials app) and no read-scale traffic to
     // accommodate. Partitioned by AAD identity, not API key — see
     // ApiSecurity.GetWriteRateLimitPartitionKey.
