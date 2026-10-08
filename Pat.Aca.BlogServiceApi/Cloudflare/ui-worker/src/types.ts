@@ -63,6 +63,9 @@ export interface Article {
    * ArticleContent.tsx for the trust rationale). */
   content: string;
   publishedAt: string;
+  /** Set by the API on every PUT; null (or absent, on an API older than
+   * this field) for an article never edited since it was created. */
+  updatedAt?: string | null;
   tags: string[];
   /** Incremented server-side by the API on every GET of this article's
    * detail page — see ArticleDetailPage for where it's shown. */

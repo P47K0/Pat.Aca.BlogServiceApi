@@ -50,5 +50,10 @@ namespace Pat.Aca.BlogServiceApi
         // Curated search keywords, distinct from Tags (Tags stay the site's
         // navigation taxonomy). Rendered as <meta name="keywords"> and the
         // JSON-LD keywords when present, falling back to Tags for JSON-LD.
-        List<string>? SeoKeywords = null);
+        List<string>? SeoKeywords = null,
+        // Server-owned: set to UtcNow by every PUT, never by POST or a
+        // viewCount bump. Null means "never edited since it was created";
+        // the sitemap's lastmod and the JSON-LD dateModified fall back to
+        // PublishedAt then. Not Cosmos's _ts, which moves on every view.
+        DateTime? UpdatedAt = null);
 }

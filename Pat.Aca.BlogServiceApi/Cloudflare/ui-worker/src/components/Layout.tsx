@@ -24,6 +24,9 @@ export interface SeoProps {
   /** ISO timestamp, article pages only — emitted as article:published_time
    * and in the JSON-LD block. */
   publishedAt?: string;
+  /** ISO timestamp of the last edit, article pages only — emitted as
+   * article:modified_time. Omitted for an article never edited. */
+  updatedAt?: string | null;
   /** Article tags, reused as-is for article:tag + JSON-LD keywords — no
    * separate "SEO keywords" field needed. */
   tags?: string[];
@@ -55,6 +58,7 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
   canonicalUrl,
   type = 'website',
   publishedAt,
+  updatedAt,
   tags,
   noindex,
   jsonLd,
@@ -99,6 +103,7 @@ export const Layout: FC<PropsWithChildren<SeoProps>> = ({
         {type === 'article' && publishedAt && (
           <meta property="article:published_time" content={publishedAt} />
         )}
+        {type === 'article' && updatedAt && <meta property="article:modified_time" content={updatedAt} />}
         {type === 'article' && <meta property="article:author" content={SITE_AUTHOR.url} />}
         {type === 'article' && tags?.map((tag) => <meta property="article:tag" content={tag} />)}
 
