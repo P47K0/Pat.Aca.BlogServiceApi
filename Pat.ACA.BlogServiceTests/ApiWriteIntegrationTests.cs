@@ -258,6 +258,23 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
+        public async Task POST_articles_leaves_updated_at_null_and_PUT_sets_it()
+        {
+            var client = CreateClient("Articles.Write");
+            using var created = await client.PostAsJsonAsync("/articles", ValidRequest("updated-at-set"));
+            var createdArticle = await created.Content.ReadFromJsonAsync<Article>();
+            // Null until the first edit; lastmod falls back to PublishedAt.
+            Assert.Null(createdArticle!.UpdatedAt);
+
+            var before = DateTime.UtcNow;
+            using var response = await client.PutAsJsonAsync("/articles/updated-at-set", ValidRequest("updated-at-set"));
+
+            var updated = await response.Content.ReadFromJsonAsync<Article>();
+            Assert.NotNull(updated!.UpdatedAt);
+            Assert.InRange(updated.UpdatedAt!.Value, before.AddSeconds(-1), DateTime.UtcNow.AddSeconds(1));
+        }
+
+        [Fact]
         public async Task PUT_articles_slug_returns_404_for_unknown_slug()
         {
             var client = CreateClient("Articles.Write");

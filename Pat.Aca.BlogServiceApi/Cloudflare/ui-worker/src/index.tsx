@@ -203,6 +203,7 @@ app.get('/articles/:slug', async (c) => {
       canonicalUrl={canonicalUrl}
       type="article"
       publishedAt={article.publishedAt}
+      updatedAt={article.updatedAt}
       tags={article.tags}
       imageUrl={article.coverImageUrl}
       keywords={article.seoKeywords}
@@ -212,6 +213,7 @@ app.get('/articles/:slug', async (c) => {
         headline: article.title,
         description: seoDescription,
         datePublished: article.publishedAt,
+        dateModified: article.updatedAt ?? article.publishedAt,
         url: canonicalUrl,
         keywords: seoKeywords.join(', '),
         author: { '@type': 'Person', name: SITE_AUTHOR.name, url: SITE_AUTHOR.url },
@@ -345,7 +347,8 @@ app.get('/sitemap.xml', async (c) => {
     { loc: `${c.env.SITE_URL}/` },
     ...articles.map((article) => ({
       loc: `${c.env.SITE_URL}/articles/${article.slug}`,
-      lastmod: article.publishedAt,
+      // The last edit, so crawlers recrawl edited articles.
+      lastmod: article.updatedAt ?? article.publishedAt,
     })),
   ];
   const body = [

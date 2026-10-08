@@ -451,7 +451,8 @@ namespace Pat.Aca.BlogServiceApi
                 PatchOperation.Set("/unlisted", request.Unlisted),
                 PatchOperation.Set("/coverImageUrl", request.CoverImageUrl),
                 PatchOperation.Set("/seoDescription", request.SeoDescription),
-                PatchOperation.Set("/seoKeywords", request.SeoKeywords)
+                PatchOperation.Set("/seoKeywords", request.SeoKeywords),
+                PatchOperation.Set("/updatedAt", DateTime.UtcNow)
             };
 
             TransactionalBatch batch = _container.CreateTransactionalBatch(new PartitionKey(slug));
@@ -483,7 +484,7 @@ namespace Pat.Aca.BlogServiceApi
             // Existing hand-authored articles keep their old (PascalCase-stored)
             // Id value untouched; it's simply never read or written by this
             // class's write methods.
-            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl, document.SeriesName, document.SeriesOrder, document.RelatedSlugs, document.Unlisted, document.CoverImageUrl, document.SeoDescription, document.SeoKeywords);
+            new(0, document.Slug, document.Title, document.Summary, document.Content, document.PublishedAt, document.Tags, document.ViewCount, document.LinkedinVideoEmbedUrl, document.SeriesName, document.SeriesOrder, document.RelatedSlugs, document.Unlisted, document.CoverImageUrl, document.SeoDescription, document.SeoKeywords, document.UpdatedAt);
 
         /// <summary>
         /// The exact JSON shape written to/read from Cosmos by every method in
@@ -558,6 +559,9 @@ namespace Pat.Aca.BlogServiceApi
 
             [JsonProperty("seoKeywords")]
             public List<string>? SeoKeywords { get; set; }
+
+            [JsonProperty("updatedAt")]
+            public DateTime? UpdatedAt { get; set; }
         }
 
         public async Task<List<ArticleSummary>> GetRecentArticlesAsync(int count = 5)

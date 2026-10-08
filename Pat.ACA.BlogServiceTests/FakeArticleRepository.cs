@@ -106,7 +106,8 @@ public sealed class FakeArticleRepository : IArticleRepository
             Unlisted = request.Unlisted,
             CoverImageUrl = request.CoverImageUrl,
             SeoDescription = request.SeoDescription,
-            SeoKeywords = request.SeoKeywords
+            SeoKeywords = request.SeoKeywords,
+            UpdatedAt = DateTime.UtcNow
         };
         SeedArticles[index] = updated;
         return Task.FromResult<Article?>(updated);
