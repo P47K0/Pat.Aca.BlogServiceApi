@@ -79,8 +79,8 @@ function pickSection(chunks: KnowledgeBaseChunk[]): string | null {
  * can't be hallucinated or malformed, and it leaves the internal [1]/[2]
  * chunk numbering out of the answer text (see the citation-leak rule in
  * generation.ts's SYSTEM_PROMPT). Only the top chunk decides which kind of
- * source it is: if a profile fact ranks first there is no page to link to,
- * even when an article chunk ranks second. */
+ * source it is: if a profile fact ranks first there is no article to link
+ * to, even when an article chunk ranks second. */
 export function pickSourceArticle(
   articleBaseUrl: string,
   answer: string,
@@ -90,16 +90,20 @@ export function pickSourceArticle(
     return null;
   }
   const top = chunks[0];
-  if (!top || top.sourceType !== 'article' || !top.sourceSlug) {
+  if (!top) {
     return null;
   }
-  if (top.sourceSlug === ABOUT_SLUG) {
-    // Chunks synced before sectionAnchor existed, or under a heading with no
-    // section (About, Key facts, Links), simply get no link.
+  // Profile facts are written from the same CV the `about` article is
+  // exported from, so a profile chunk ranking first doesn't make the answer
+  // any less grounded in a homepage section: found 2026-10-10 live, where
+  // "production AKS clusters" opened with the profile fact and got no link
+  // because only an `about` top chunk was allowed to vote. A profile top
+  // chunk has no page of its own, so it still never produces an article link.
+  if (top.sourceType === 'profile' || top.sourceSlug === ABOUT_SLUG) {
     const anchor = pickSection(chunks);
     return anchor ? { type: 'section', anchor } : null;
   }
-  if (top.score < MIN_SOURCE_LINK_SCORE) {
+  if (top.sourceType !== 'article' || !top.sourceSlug || top.score < MIN_SOURCE_LINK_SCORE) {
     return null;
   }
   return { type: 'article', slug: top.sourceSlug, url: `${articleBaseUrl}/${encodeURIComponent(top.sourceSlug)}` };

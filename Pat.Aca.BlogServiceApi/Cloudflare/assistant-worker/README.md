@@ -67,7 +67,7 @@ project's own conventions:
     model -- and only when that chunk is a `sourceType: "article"` chunk
     above a similarity floor, and the reply isn't the language redirect:
     `{ type: "article", slug, url }` for a blog article, or
-    `{ type: "section", anchor }` when the top chunk is from the `about` CV
+    `{ type: "section", anchor }` when the top chunk is a profile fact or from the `about` CV
     article: the homepage section (id stored on each chunk as
     `sectionAnchor` by `tools/about-sync`) that the retrieved `about` chunks
     agree on (>= 2 chunks, or one chunk >= 0.7), else `null`. The widget renders it as a link;
