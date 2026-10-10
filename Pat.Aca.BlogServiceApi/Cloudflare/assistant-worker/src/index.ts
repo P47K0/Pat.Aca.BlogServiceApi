@@ -12,6 +12,7 @@ import { bumpContentVersion } from './lib/cache-invalidation';
 import { getEmbeddingsCount } from './lib/embeddings-count';
 import { addRecentAnswerIfReal, getRecentAnswers } from './lib/recent-answers';
 import { pickSourceArticle } from './lib/source-link';
+import { pickContactLink } from './lib/contact-link';
 
 const CACHE_INVALIDATION_KEY_HEADER = 'X-Cache-Invalidation-Key';
 const EMBEDDINGS_COUNT_KEY_HEADER = 'X-Embeddings-Count-Key';
@@ -88,17 +89,21 @@ async function handleAsk(request: Request, env: Env, ctx: ExecutionContext, clie
     cache = 'miss';
   }
 
-  const answer = await generateAnswer(env.AI, question, chunks);
+  const { answer, unanswered } = await generateAnswer(env.AI, question, chunks);
 
   // Fire-and-forget, same as the conversation-logging waitUntil below --
   // feeds the public fact box's rolling buffer (recent-answers.ts) whenever
   // this answer is real and grounded, independent of allowLogging (an
   // answer alone is never visitor data, see that module's own comment).
-  ctx.waitUntil(
-    addRecentAnswerIfReal(env.ASSISTANT_CACHE, answer, chunks).catch((error) =>
-      console.error('Recent-answers buffer update failed:', error),
-    ),
-  );
+  // An answer that says "I can't answer that" is never shown in the fact box,
+  // whatever its retrieval scores were.
+  if (!unanswered) {
+    ctx.waitUntil(
+      addRecentAnswerIfReal(env.ASSISTANT_CACHE, answer, chunks).catch((error) =>
+        console.error('Recent-answers buffer update failed:', error),
+      ),
+    );
+  }
 
   // Not stored by default -- allowLogging is the future chat widget's own
   // opt-in toggle (disclosed plainly next to it, Phase 7 concern, not
@@ -124,7 +129,10 @@ async function handleAsk(request: Request, env: Env, ctx: ExecutionContext, clie
   // Kept out of `answer` itself on purpose: the fact box, conversation log
   // and recent-answers buffer all store the plain answer text, and the
   // widget renders a real clickable link from this field.
-  const source = pickSourceArticle(env.ARTICLE_BASE_URL, answer, chunks);
+  // A contact link (contact intent, CV request, or an unanswerable question)
+  // wins over an article or section link, see contact-link.ts.
+  const source =
+    pickContactLink(env.CONTACT_URL, question, unanswered) ?? pickSourceArticle(env.ARTICLE_BASE_URL, answer, chunks);
 
   return Response.json({ answer, chunks, cache, source });
 }
