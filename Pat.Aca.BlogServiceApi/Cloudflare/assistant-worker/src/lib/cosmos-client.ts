@@ -62,6 +62,9 @@ export interface KnowledgeBaseChunk {
   id: string;
   sourceType: SourceType;
   sourceSlug?: string;
+  /** Homepage section id, set only on `about` article chunks by
+   * tools/about-sync/sync_about.py (see source-link.ts). */
+  sectionAnchor?: string;
   text: string;
   score: number;
 }
@@ -140,7 +143,7 @@ async function queryPartition(
       // `score` itself is raw cosine SIMILARITY for this container (higher
       // = more similar), not distance -- see retrieveChunks's own comment
       // for why that distinction mattered beyond just this one query.
-      query: `SELECT TOP ${topK} c.id, c.sourceType, c.sourceSlug, c.text, VectorDistance(c.embedding, @embedding) AS score
+      query: `SELECT TOP ${topK} c.id, c.sourceType, c.sourceSlug, c.sectionAnchor, c.text, VectorDistance(c.embedding, @embedding) AS score
               FROM c ${whereClause}ORDER BY VectorDistance(c.embedding, @embedding)`,
       parameters,
     }),

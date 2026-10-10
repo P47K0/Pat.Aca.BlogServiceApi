@@ -10,7 +10,10 @@ local Ollama is reachable. Python stdlib only.
 Steps: GET the current article; stop if the content is unchanged. Otherwise PUT
 the article with only `content` replaced, then embed every blank-line paragraph
 plus the "{title}. {summary}" chunk with bge-m3 and write them to KnowledgeBase
-as about-paragraph-{n} / about-summary (PUT to replace, POST on 404).
+as about-paragraph-{n} / about-summary (PUT to replace, POST on 404). Each
+paragraph also carries `sectionAnchor`, the homepage section id of the `## `
+heading it sits under (SECTION_ANCHORS), which /ask returns so the widget can
+scroll to that section.
 
 --embed-only re-writes the embeddings for an article that is already updated,
 e.g. after a run that failed halfway through the embedding writes.
@@ -93,6 +96,35 @@ def chunks(content):
     return [b.strip() for b in re.split(r"\n\s*\n", content) if b.strip()]
 
 
+# `## ` heading in the export -> the homepage section id the assistant widget
+# scrolls to. Stored on each chunk as `sectionAnchor`. Headings not listed here
+# (About, Key facts, Site statistics, Links) get no anchor. If a section id in
+# website/public/index.html is renamed, update this table and re-run with
+# --embed-only.
+SECTION_ANCHORS = {
+    "Applied AI, running live": "ai-section",
+    "Other side projects": "side-projects-section",
+    "Infrastructure & DevOps": "devops-section",
+    "Skills": "skills-section",
+    "Certifications": "certifications-section",
+    "My work style": "work-style-section",
+}
+
+
+def section_anchors(paragraphs):
+    """The anchor for each paragraph: that of the most recent `## ` heading at
+    or before it (None before the first mapped heading)."""
+    anchors, current = [], None
+    for p in paragraphs:
+        if p.startswith("## "):
+            heading = p[3:].strip()
+            current = SECTION_ANCHORS.get(heading)
+            if current is None:
+                print(f"  note: no anchor for heading {heading!r}")
+        anchors.append(current)
+    return anchors
+
+
 def embed(texts):
     s, j = req("POST", OLLAMA, {"Content-Type": "application/json"}, {"model": "bge-m3", "input": texts})
     assert s == 200, (s, j)
@@ -147,8 +179,9 @@ def put_article(article, new_content):
 
 
 def write_embeddings(article, new_chunks):
-    docs = [(f"{SLUG}-paragraph-{i}", "paragraph", t) for i, t in enumerate(new_chunks)]
-    docs.append((f"{SLUG}-summary", "summary", f"{article['title']}. {article['summary']}"))
+    anchors = section_anchors(new_chunks)
+    docs = [(f"{SLUG}-paragraph-{i}", "paragraph", t, anchors[i]) for i, t in enumerate(new_chunks)]
+    docs.append((f"{SLUG}-summary", "summary", f"{article['title']}. {article['summary']}", None))
     vecs = []
     for i in range(0, len(docs), 16):
         vecs += embed([d[2] for d in docs[i:i + 16]])
@@ -162,9 +195,11 @@ def write_embeddings(article, new_chunks):
     }
     # The writer identity isn't allowed to upsert (403), so PUT to replace, POST on 404.
     counts = {"replaced": 0, "created": 0}
-    for (doc_id, ctype, text), vec in zip(docs, vecs):
+    for (doc_id, ctype, text, anchor), vec in zip(docs, vecs):
         doc = {"id": doc_id, "sourceType": "article", "sourceSlug": SLUG, "chunkType": ctype,
                "text": text, "embedding": vec}
+        if anchor:
+            doc["sectionAnchor"] = anchor
         s, j = req("PUT", f"{COSMOS}{COLL}/docs/{doc_id}", h, doc)
         if s == 404:
             s, j = req("POST", f"{COSMOS}{COLL}/docs", h, doc)
