@@ -11,6 +11,7 @@ import { withCors, handlePreflight } from './lib/cors';
 import { bumpContentVersion } from './lib/cache-invalidation';
 import { getEmbeddingsCount } from './lib/embeddings-count';
 import { addRecentAnswerIfReal, getRecentAnswers } from './lib/recent-answers';
+import { pickSourceArticle } from './lib/source-link';
 
 const CACHE_INVALIDATION_KEY_HEADER = 'X-Cache-Invalidation-Key';
 const EMBEDDINGS_COUNT_KEY_HEADER = 'X-Embeddings-Count-Key';
@@ -120,7 +121,12 @@ async function handleAsk(request: Request, env: Env, ctx: ExecutionContext, clie
     );
   }
 
-  return Response.json({ answer, chunks, cache });
+  // Kept out of `answer` itself on purpose: the fact box, conversation log
+  // and recent-answers buffer all store the plain answer text, and the
+  // widget renders a real clickable link from this field.
+  const source = pickSourceArticle(env.ARTICLE_BASE_URL, answer, chunks);
+
+  return Response.json({ answer, chunks, cache, source });
 }
 
 /** POST /internal/invalidate-cache — Phase 5. Called by ACA right after a

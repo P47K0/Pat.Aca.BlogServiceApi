@@ -33,6 +33,8 @@ COSMOS_ACCOUNT_NAME = "cosmos-koorevaar"
 # repo's own blog.koorevaar.com -- not a secret, CORS is about telling
 # browsers which caller to trust, not about hiding this value.
 ALLOWED_ORIGIN = "https://www.koorevaar.com"
+# Base for the source-article link returned with an answer (source-link.ts).
+ARTICLE_BASE_URL = "https://blog.koorevaar.com/articles"
 
 # KnowledgeBase-Reader identity (see infra/cosmos-db.bicep's
 # knowledgeBaseReaderPrincipalId): a dedicated, read+executeQuery-only

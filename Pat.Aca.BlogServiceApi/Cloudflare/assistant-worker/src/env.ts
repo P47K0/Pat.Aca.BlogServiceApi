@@ -15,6 +15,10 @@ export interface Env {
    * a plain `[vars]` entry; CORS is about telling browsers which caller to
    * trust, not about hiding this value. */
   ALLOWED_ORIGIN: string;
+  /** Public base URL of an article page, no trailing slash, e.g.
+   * "https://blog.koorevaar.com/articles" -- used to build the "read more"
+   * link returned with an answer (source-link.ts). Plain `[vars]` entry. */
+  ARTICLE_BASE_URL: string;
   /** Tenant/client ID of the KnowledgeBase-Reader app registration — a
    * dedicated, read+executeQuery-only identity (see infra/cosmos-db.bicep's
    * knowledgeBaseReaderPrincipalId), deliberately narrower than
