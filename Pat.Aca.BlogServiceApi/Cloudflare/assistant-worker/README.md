@@ -62,6 +62,12 @@ project's own conventions:
     co-occur in the same query's results. Server-to-server only, guarded by
     its own shared secret — called by `ui-worker`'s search page, never a
     visitor's browser directly.
+13. Source-article link: `POST /ask` also returns `source: { slug, url } | null`
+    (`src/lib/source-link.ts`), built Worker-side from the top-scoring
+    chunk's `sourceSlug` -- never written by the model -- and only when that
+    chunk is a `sourceType: "article"` chunk above a similarity floor (not
+    the `about` CV article, not a language-redirect reply). The widget
+    renders it as a link; `answer` itself is unchanged.
 
 ## Setup
 
