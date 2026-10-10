@@ -19,6 +19,9 @@ export interface Env {
    * "https://blog.koorevaar.com/articles" -- used to build the "read more"
    * link returned with an answer (source-link.ts). Plain `[vars]` entry. */
   ARTICLE_BASE_URL: string;
+  /** Where the contact link of an answer points, e.g.
+   * "https://contact.koorevaar.com" (contact-link.ts). Plain `[vars]` entry. */
+  CONTACT_URL: string;
   /** Tenant/client ID of the KnowledgeBase-Reader app registration — a
    * dedicated, read+executeQuery-only identity (see infra/cosmos-db.bicep's
    * knowledgeBaseReaderPrincipalId), deliberately narrower than
