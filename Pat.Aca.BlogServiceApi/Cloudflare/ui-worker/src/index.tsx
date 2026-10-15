@@ -342,8 +342,11 @@ app.post('/articles/:slug/comments', async (c) => {
 });
 
 // Not indexed: transient error/not-found responses, never real content.
+// /partials/ are htmx fragments, not pages: Google picked up
+// "/partials/articles?after=" from the "load more" markup and reported its
+// 400 under "Blocked due to other 4xx issue".
 app.get('/robots.txt', (c) =>
-  c.text(`User-agent: *\nAllow: /\nSitemap: ${c.env.SITE_URL}/sitemap.xml\n`),
+  c.text(`User-agent: *\nAllow: /\nDisallow: /partials/\nSitemap: ${c.env.SITE_URL}/sitemap.xml\n`),
 );
 
 // Bing Webmaster Tools ownership check. The code is per Bing account, not a
