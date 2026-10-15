@@ -21,7 +21,7 @@
  * be counted per day, not followed across days. */
 
 const SUBSCRIBERS_PATTERN = /(\d+)\s+(?:subscribers?|readers?)\b/i;
-const CRAWLER_PATTERN =
+export const CRAWLER_PATTERN =
   /bot\b|bot\/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl\/|wget\/|python-|go-http-client|okhttp|pubsubhubbub|validator/i;
 
 type FeedFetchKind = 'aggregator' | 'reader' | 'browser' | 'crawler';

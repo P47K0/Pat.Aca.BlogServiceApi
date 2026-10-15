@@ -8,6 +8,7 @@ import { searchAssistant, resolveSearchResults } from './lib/search-client';
 import { verifyTurnstile } from './lib/turnstile';
 import { escapeXml } from './lib/xml';
 import { estimateSubscribers, recordFeedFetch, type DailyEstimate } from './lib/feed-analytics';
+import { articleReferrers, MAX_REFERRER_DAYS, recordArticleView, type ArticleReferrers } from './lib/referrer-analytics';
 import { Layout, SITE_AUTHOR } from './components/Layout';
 import { ArticlesFragment } from './components/ArticlesFragment';
 import { HomePage, LOAD_MORE_PAGE_SIZE } from './pages/Home';
@@ -157,6 +158,12 @@ app.get('/articles/:slug', async (c) => {
   const article = await getArticleBySlug(c.env, c.req.param('slug'));
   if (!article) {
     return c.notFound();
+  }
+  try {
+    recordArticleView(c.env.REFERRER_ANALYTICS, c.req.raw, article.slug);
+  } catch (err) {
+    // A failed analytics write never breaks the page.
+    console.error('referrer analytics', err);
   }
 
   // Series nav / related articles need other articles' titles, which the
@@ -390,6 +397,37 @@ app.get('/feed-subscribers.json', async (c) => {
   const count = Math.max(0, ...days.map((d) => d.total));
   const response = c.json(detail ? { count, days } : { count }, 200, {
     'Cache-Control': `public, max-age=${FEED_SUBSCRIBERS_TTL_SECONDS}`,
+  });
+  c.executionCtx.waitUntil(caches.default.put(cacheKey, response.clone()));
+  return response;
+});
+
+// Article views per referring site, last 30 days by default (?days=1..90),
+// for seeing where readers come from. ?slug= narrows it to one article.
+// Cached for an hour per colo per variant, like /feed-subscribers.json.
+const REFERRERS_TTL_SECONDS = 3600;
+app.get('/referrers.json', async (c) => {
+  const days = Math.min(MAX_REFERRER_DAYS, Math.max(1, Math.floor(Number(c.req.query('days') ?? 30)) || 30));
+  const slug = c.req.query('slug');
+  const cacheUrl = new URL('/referrers.json', c.req.url);
+  cacheUrl.searchParams.set('days', String(days));
+  if (slug) cacheUrl.searchParams.set('slug', slug);
+  const cacheKey = new Request(cacheUrl.toString());
+  const cached = await caches.default.match(cacheKey);
+  if (cached) return cached;
+
+  let articles: ArticleReferrers[] = [];
+  if (c.env.CF_ACCOUNT_ID && c.env.CF_ANALYTICS_TOKEN) {
+    try {
+      articles = await articleReferrers(c.env.CF_ACCOUNT_ID, c.env.CF_ANALYTICS_TOKEN, days);
+    } catch (err) {
+      console.error('referrers', err);
+      return c.json({ days, articles: [] }, 200, { 'Cache-Control': 'no-store' });
+    }
+  }
+  if (slug) articles = articles.filter((a) => a.slug === slug);
+  const response = c.json({ days, articles }, 200, {
+    'Cache-Control': `public, max-age=${REFERRERS_TTL_SECONDS}`,
   });
   c.executionCtx.waitUntil(caches.default.put(cacheKey, response.clone()));
   return response;

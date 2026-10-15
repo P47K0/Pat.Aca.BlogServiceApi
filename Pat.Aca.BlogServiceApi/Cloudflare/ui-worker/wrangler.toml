@@ -61,3 +61,10 @@ enabled = true
 [[analytics_engine_datasets]]
 binding = "FEED_ANALYTICS"
 dataset = "rss_feed_fetches"
+
+# One data point per article page view (slug, referring site), read back by
+# GET /referrers.json and tools/article-referrers. Same account token as
+# rss_feed_fetches above.
+[[analytics_engine_datasets]]
+binding = "REFERRER_ANALYTICS"
+dataset = "article_referrers"
