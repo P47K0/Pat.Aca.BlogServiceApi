@@ -32,10 +32,15 @@ export interface Env {
    * /feed.xml fetch, for the RSS subscriber estimate (see
    * lib/feed-analytics.ts). Binding in wrangler.toml. */
   FEED_ANALYTICS: AnalyticsEngineDataset;
+  /** Analytics Engine dataset `article_referrers`: one data point per
+   * article page view, for views per referring site (see
+   * lib/referrer-analytics.ts). Binding in wrangler.toml. */
+  REFERRER_ANALYTICS: AnalyticsEngineDataset;
   /** Cloudflare account id and an "Account Analytics: Read" API token, for
-   * reading rss_feed_fetches back via the Analytics Engine SQL API (GET
-   * /feed-subscribers.json). Both set via `wrangler secret put`; unset means
-   * the endpoint reports 0. */
+   * reading rss_feed_fetches and article_referrers back via the Analytics
+   * Engine SQL API (GET /feed-subscribers.json, GET /referrers.json). Both
+   * set via `wrangler secret put`; unset means the endpoints report 0 / an
+   * empty list. */
   CF_ACCOUNT_ID?: string;
   CF_ANALYTICS_TOKEN?: string;
 }
