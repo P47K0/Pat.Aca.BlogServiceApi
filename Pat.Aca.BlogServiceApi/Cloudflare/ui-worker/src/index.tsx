@@ -403,15 +403,19 @@ app.get('/feed-subscribers.json', async (c) => {
 });
 
 // Article views per referring site, last 30 days by default (?days=1..90),
-// for seeing where readers come from. ?slug= narrows it to one article.
+// for seeing where readers come from. ?slug= narrows it to one article;
+// ?source=external drops the `direct` entries (article totals and order are
+// recomputed from what is left, articles with nothing left are dropped).
 // Cached for an hour per colo per variant, like /feed-subscribers.json.
 const REFERRERS_TTL_SECONDS = 3600;
 app.get('/referrers.json', async (c) => {
   const days = Math.min(MAX_REFERRER_DAYS, Math.max(1, Math.floor(Number(c.req.query('days') ?? 30)) || 30));
   const slug = c.req.query('slug');
+  const externalOnly = c.req.query('source') === 'external';
   const cacheUrl = new URL('/referrers.json', c.req.url);
   cacheUrl.searchParams.set('days', String(days));
   if (slug) cacheUrl.searchParams.set('slug', slug);
+  if (externalOnly) cacheUrl.searchParams.set('source', 'external');
   const cacheKey = new Request(cacheUrl.toString());
   const cached = await caches.default.match(cacheKey);
   if (cached) return cached;
@@ -426,6 +430,15 @@ app.get('/referrers.json', async (c) => {
     }
   }
   if (slug) articles = articles.filter((a) => a.slug === slug);
+  if (externalOnly) {
+    articles = articles
+      .map((a) => {
+        const referrers = a.referrers.filter((r) => r.source !== 'direct');
+        return { ...a, referrers, views: referrers.reduce((sum, r) => sum + r.views, 0) };
+      })
+      .filter((a) => a.views > 0)
+      .sort((a, b) => b.views - a.views || a.slug.localeCompare(b.slug));
+  }
   const response = c.json({ days, articles }, 200, {
     'Cache-Control': `public, max-age=${REFERRERS_TTL_SECONDS}`,
   });
