@@ -125,13 +125,26 @@ app.get('/search', async (c) => {
 // silently fell through to `/articles/:slug` in the same local test. What
 // does work: one regex param spanning the whole segment (`.+\.md`), with the
 // ".md" stripped by hand in the handler.
+//
+// Both Markdown variants point search engines at the HTML page with a
+// canonical Link header (the HTTP form Google supports for non-HTML
+// resources): without it Google crawled every .md as its own page and listed
+// them under "Crawled - currently not indexed". Agents still get the
+// Markdown; only indexing credit moves to the HTML URL.
+function markdownHeaders(siteUrl: string, slug: string): Record<string, string> {
+  return {
+    'Content-Type': 'text/markdown; charset=utf-8',
+    Link: `<${siteUrl}/articles/${slug}>; rel="canonical"`,
+  };
+}
+
 app.get('/articles/:slugWithMd{.+\\.md}', async (c) => {
   const slug = c.req.param('slugWithMd').replace(/\.md$/, '');
   const markdown = await getArticleMarkdown(c.env, slug);
   if (markdown === null) {
     return c.notFound();
   }
-  return c.body(markdown, 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+  return c.body(markdown, 200, markdownHeaders(c.env.SITE_URL, slug));
 });
 
 // Content negotiation on the article URL itself: an agent sending
@@ -145,14 +158,23 @@ function wantsMarkdown(acceptHeader: string | undefined): boolean {
   return Boolean(acceptHeader?.toLowerCase().includes('text/markdown'));
 }
 
+// A trailing slash ("/articles/foo/") is a different path to Hono and used to
+// 404; Google reported one such URL as "Not found". Redirect it permanently
+// to the canonical slash-less URL, keeping any query string.
+app.get('/articles/:slug/', (c) => {
+  const url = new URL(c.req.url);
+  return c.redirect(`${c.env.SITE_URL}/articles/${c.req.param('slug')}${url.search}`, 301);
+});
+
 app.get('/articles/:slug', async (c) => {
   c.header('Vary', 'Accept');
   if (wantsMarkdown(c.req.header('Accept'))) {
-    const markdown = await getArticleMarkdown(c.env, c.req.param('slug'));
+    const slug = c.req.param('slug');
+    const markdown = await getArticleMarkdown(c.env, slug);
     if (markdown === null) {
       return c.notFound();
     }
-    return c.body(markdown, 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+    return c.body(markdown, 200, markdownHeaders(c.env.SITE_URL, slug));
   }
 
   const article = await getArticleBySlug(c.env, c.req.param('slug'));
@@ -320,8 +342,11 @@ app.post('/articles/:slug/comments', async (c) => {
 });
 
 // Not indexed: transient error/not-found responses, never real content.
+// /partials/ are htmx fragments, not pages: Google picked up
+// "/partials/articles?after=" from the "load more" markup and reported its
+// 400 under "Blocked due to other 4xx issue".
 app.get('/robots.txt', (c) =>
-  c.text(`User-agent: *\nAllow: /\nSitemap: ${c.env.SITE_URL}/sitemap.xml\n`),
+  c.text(`User-agent: *\nAllow: /\nDisallow: /partials/\nSitemap: ${c.env.SITE_URL}/sitemap.xml\n`),
 );
 
 // Bing Webmaster Tools ownership check. The code is per Bing account, not a
