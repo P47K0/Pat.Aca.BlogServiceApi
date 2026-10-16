@@ -11,7 +11,11 @@
  *   browser tokens, such as Chrome or iOS Safari); a visit, not a subscriber.
  * - crawler: search engines, link previews, uptime checks, feed validators,
  *   the WebSub hub (it fetches the feed after each ping, for the readers
- *   subscribed to it); not subscribers.
+ *   subscribed to it); not subscribers. The hub at pubsubhubbub.appspot.com
+ *   fetches as "FeedFetcher-Google" from several IPs, so before
+ *   `feedfetcher` was in CRAWLER_PATTERN it counted as up to 5 readers a
+ *   day. Feedly's User-Agent says "like FeedFetcher-Google" but also carries
+ *   its subscriber count, so it is still classed as an aggregator first.
  *
  * Layout: index1 = kind, blob1 = kind, blob2 = reader name, blob3 = visitor
  * hash, double1 = reported subscribers (0 when the User-Agent has none).
@@ -22,7 +26,7 @@
 
 const SUBSCRIBERS_PATTERN = /(\d+)\s+(?:subscribers?|readers?)\b/i;
 export const CRAWLER_PATTERN =
-  /bot\b|bot\/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl\/|wget\/|python-|go-http-client|okhttp|pubsubhubbub|validator/i;
+  /bot\b|bot\/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl\/|wget\/|python-|go-http-client|okhttp|pubsubhubbub|feedfetcher|validator/i;
 
 type FeedFetchKind = 'aggregator' | 'reader' | 'browser' | 'crawler';
 

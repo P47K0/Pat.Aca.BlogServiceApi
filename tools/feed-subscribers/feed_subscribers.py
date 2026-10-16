@@ -32,7 +32,7 @@ BROWSER_TOKENS = {
 # Same as CRAWLER_PATTERN in feed-analytics.ts. Rows written before a crawler
 # was added there are kind "reader" named after it ("FeedValidator").
 CRAWLER_PATTERN = re.compile(
-    r"bot\b|bot/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl/|wget/|python-|go-http-client|okhttp|pubsubhubbub|validator",
+    r"bot\b|bot/|crawl|spider|slurp|preview|monitor|uptime|lighthouse|headless|curl/|wget/|python-|go-http-client|okhttp|pubsubhubbub|feedfetcher|validator",
     re.I,
 )
 
