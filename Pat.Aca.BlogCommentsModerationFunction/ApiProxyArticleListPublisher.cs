@@ -39,6 +39,10 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                             coverImageUrl = article.CoverImageUrl,
                             seoDescription = article.SeoDescription,
                             seoKeywords = article.SeoKeywords,
+                            seriesName = article.SeriesName,
+                            seriesOrder = article.SeriesOrder,
+                            relatedSlugs = article.RelatedSlugs,
+                            updatedAt = article.UpdatedAt,
                         }),
                     })
                 };

@@ -7,7 +7,7 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
     public class ArticleListSyncProcessorTests
     {
         private static ArticleListItem MakeArticle(string slug) =>
-            new(1, slug, "Title", "Summary", "2026-01-01T00:00:00Z", new[] { "tag" }, 0, null, null, null, null);
+            new(1, slug, "Title", "Summary", "2026-01-01T00:00:00Z", new[] { "tag" }, 0, null, null, null, null, null, null, null, null);
 
         [Fact]
         public async Task SyncAsync_publishes_the_recomputed_list()

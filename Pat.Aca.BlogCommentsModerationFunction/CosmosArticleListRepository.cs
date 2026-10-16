@@ -37,7 +37,8 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         {
             var query = new QueryDefinition(
                 "SELECT c.slug, c.title, c.summary, c.publishedAt, c.tags, " +
-                "c.viewCount, c.linkedinVideoEmbedUrl, c.coverImageUrl, c.seoDescription, c.seoKeywords FROM c " +
+                "c.viewCount, c.linkedinVideoEmbedUrl, c.coverImageUrl, c.seoDescription, c.seoKeywords, " +
+                "c.seriesName, c.seriesOrder, c.relatedSlugs, c.updatedAt FROM c " +
                 "WHERE c.publishedAt <= @now AND (NOT IS_DEFINED(c.unlisted) OR c.unlisted = false) " +
                 "ORDER BY c.publishedAt DESC")
                 .WithParameter("@now", DateTime.UtcNow);
@@ -62,7 +63,11 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                     document.LinkedinVideoEmbedUrl,
                     document.CoverImageUrl,
                     document.SeoDescription,
-                    document.SeoKeywords)));
+                    document.SeoKeywords,
+                    document.SeriesName,
+                    document.SeriesOrder,
+                    document.RelatedSlugs,
+                    document.UpdatedAt)));
             }
 
             return articles;
@@ -99,6 +104,18 @@ namespace Pat.Aca.BlogCommentsModerationFunction
 
             [JsonProperty("seoKeywords")]
             public List<string>? SeoKeywords { get; set; }
+
+            [JsonProperty("seriesName")]
+            public string? SeriesName { get; set; }
+
+            [JsonProperty("seriesOrder")]
+            public int? SeriesOrder { get; set; }
+
+            [JsonProperty("relatedSlugs")]
+            public List<string>? RelatedSlugs { get; set; }
+
+            [JsonProperty("updatedAt")]
+            public DateTime? UpdatedAt { get; set; }
         }
     }
 }

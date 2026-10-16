@@ -23,15 +23,14 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// on the whole container from that feature, so no new RBAC is needed
     /// either.
     ///
-    /// Unlike the count sync, this can't rely on Change Feed deliveries
-    /// alone to stay fully correct: CosmosArticleListRepository's query
-    /// keeps GetArticlesAsync's future-publishedAt exclusion (this feeds
-    /// what readers actually see, not a wall-clock-independent count), so a
-    /// scheduled article crossing into "published" with no new Cosmos write
-    /// still needs api-proxy's own request-driven revalidate/durable-
-    /// fallback machinery to eventually pick it up -- this sync narrows
-    /// that staleness window on every real write, it doesn't replace that
-    /// machinery entirely.
+    /// Unlike the count sync, Change Feed deliveries alone can't keep this
+    /// fully correct: CosmosArticleListRepository's query keeps
+    /// GetArticlesAsync's future-publishedAt exclusion, so a scheduled
+    /// article crossing into "published" causes no Cosmos write, and a
+    /// direct Cosmos delete never reaches the Change Feed at all. Since
+    /// api-proxy serves /articles from this push alone (no origin call),
+    /// ArticleListTimerSyncFunction runs the same sync on a timer to cover
+    /// both.
     /// </summary>
     public sealed class ArticleListSyncFunction(
         ArticleListSyncProcessor processor,
