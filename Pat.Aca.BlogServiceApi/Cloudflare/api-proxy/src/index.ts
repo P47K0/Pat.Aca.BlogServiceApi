@@ -63,43 +63,36 @@ const CORS_HEADERS: Record<string, string> = {
 const ARTICLE_SLUG_PATH = /^\/articles\/[^/]+$/;
 const ARTICLE_COMMENTS_PATH = /^\/articles\/[^/]+\/comments$/;
 
-// --- Stale-while-revalidate cache -----------------------------------------
+// --- Per-colo cache in front of KV -----------------------------------------
 //
-// blog-service-api's Container App scales to zero, so any request after an
-// idle period pays full cold-start latency — worst case a reader clicking an
-// article link right after the container's gone idle. Rather than a plain
-// TTL cache (which still makes *someone* pay the cold start once the TTL
-// expires), this always serves whatever is currently cached immediately, and
-// only refreshes the cache from origin in the background, at most once per
-// REVALIDATE_INTERVAL_MS per route. That interval is a rate-limit on
-// re-checking the origin, not an expiry — a cached entry never goes stale
-// from age alone, so no real visitor waits on a cold start once *any* cached
-// copy exists. Only a true first-ever request for a route (or a cache entry
-// evicted by Cloudflare) still pays a synchronous cold start.
+// blog-service-api's Container App scales to zero (~30s cold start,
+// measured 2026-09-04). Every reader-facing article route (the list, an
+// article page, its .md and its comments) is served from KV, which the
+// Function app's Change Feed and timer pushes keep current; none of them
+// calls origin on a reader request any more (see readThroughKv). Bots
+// crawling across many colos therefore no longer wake the container.
 //
-// Origin reads don't count views (the ui-worker's page beacon does, and the
+// The Cache API sits in front of KV so a busy colo reads a KV key at most
+// once per REVALIDATE_INTERVAL_MS: a cached response younger than that is
+// served as-is, an older one is replaced by a fresh KV read. So a push is
+// visible everywhere within that interval.
+//
+// Reads don't count views (the ui-worker's page beacon does, and the
 // Function's ViewCountFlushFunction adds them to Cosmos hourly), so serving
-// from cache loses no views. No purge-on-write is needed either: staleness after an edit the user makes
-// themselves is already bounded to REVALIDATE_INTERVAL_MS by the background
-// refresh itself.
+// from KV loses none.
 //
-// A cold start on this container was measured at ~30s (2026-09-04), well
-// under this interval — so the interval isn't hiding an unknown worst case,
-// it's a deliberate choice of how often to pay a background (never
-// visitor-facing) cold start in exchange for fresher content after an edit.
+// The one remaining origin read is self-healing a listed article whose KV
+// snapshot is missing (see healMissingArticle); with the detail sync's
+// backfill that shouldn't happen.
 const REVALIDATE_INTERVAL_MS = 1 * 60 * 1000;
 
-// Custom header recording when a cached response was fetched from origin, so
-// a later request can tell whether it's due for a background refresh. Not a
-// standard cache-control header — we want "never auto-expire, just rate-limit
-// re-checks", which s-maxage/Cache-Control don't express on their own.
+// Custom header recording when a cached response was last read from KV (or
+// fetched from origin), so a later request can tell whether it's due for a
+// fresh KV read. Not a standard cache-control header: the cached copy never
+// expires on its own, it's just rechecked at most once per interval.
 const CACHED_AT_HEADER = 'X-Swr-Cached-At';
 
-// Cloudflare's Cache API is per-colo, not a single global cache, so
-// "at most once per ~3 min per route" is actually per edge location that
-// happens to see traffic for that route — a known limitation of this
-// approach, accepted rather than reaching for a global store (e.g. KV) for
-// what's ultimately a soft rate-limit on re-checking origin.
+// Per-colo, not global: "at most once per interval" is per edge location.
 const cache = caches.default;
 
 /** Cache key. Includes the query string, which the routes cached here never
@@ -237,24 +230,6 @@ async function fetchAndRender(env: Env, pathname: string, search: string): Promi
     }),
     cacheable: true,
   };
-}
-
-/** Background refresh: refetches from origin and, only on success, replaces
- * the cache entry (updating its cached-at timestamp). On failure the
- * existing cached copy — stale or not — is left exactly as-is, so it keeps
- * being served and the next request past the interval just tries again. */
-async function revalidate(env: Env, pathname: string, search: string, key: Request): Promise<void> {
-  const { response, cacheable } = await fetchAndRender(env, pathname, search);
-  if (cacheable) {
-    // Snapshot from a clone *before* cache.put() gets the original — put()
-    // consumes the response body, so cloning after would be too late. Only
-    // article detail requests get here with a durable snapshot to update;
-    // the list never revalidates against origin (see "Article list from KV").
-    if (ARTICLE_SLUG_PATH.test(pathname)) {
-      await writeDetailFallbackSnapshot(env, extractSlug(pathname), response.clone());
-    }
-    await cache.put(key, response);
-  }
 }
 
 // --- Article count -----------------------------------------------------
@@ -681,28 +656,30 @@ function articleMarkdown(article: Article): string {
   return article.unlisted ? article.content : `${article.content.trimEnd()}\n\n---\n\n${ARTICLE_FOOTER}\n`;
 }
 
+/** GET /articles/{slug}.md and GET /about.md from the article-md:{slug}
+ * snapshot (see "Article detail sync"). A future-dated article is a 404, as
+ * on the API. A missing snapshot of a listed article heals from origin. */
 async function proxyArticleMarkdownRequest(
   env: Env,
   ctx: ExecutionContext,
   slug: string,
   key: Request,
+  requestUrl: string,
 ): Promise<Response> {
-  const cached = await cache.match(key);
-  if (cached) {
-    const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
-    if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
-      ctx.waitUntil(
-        fetchArticleMarkdown(env, slug).then((response) => (response.ok ? cache.put(key, response.clone()) : undefined)),
-      );
-    }
-    return cached;
-  }
+  const response = await readThroughKv(env, ctx, key, articleMarkdownKey(slug), (stored) => {
+    const snapshot = JSON.parse(stored) as MarkdownSnapshot;
+    if (!isPublished(snapshot.publishedAt)) return notFound();
+    return new Response(snapshot.markdown, {
+      status: 200,
+      headers: { 'Content-Type': 'text/markdown; charset=utf-8', ...CORS_HEADERS },
+    });
+  });
+  if (response) return response;
 
-  const response = await fetchArticleMarkdown(env, slug);
-  if (response.ok) {
-    ctx.waitUntil(cache.put(key, response.clone()));
-  }
-  return response;
+  if (!(await isListedSlug(env, ctx, requestUrl, slug))) return notFound();
+  const healed = await fetchArticleMarkdown(env, slug);
+  if (healed.ok) ctx.waitUntil(cache.put(key, healed.clone()));
+  return healed;
 }
 
 // --- Article list from KV --------------------------------------------------
@@ -730,7 +707,6 @@ const FALLBACK_KV_KEY = 'article-list';
 // How many of the newest articles count as "the feed's newest items" for
 // the WebSub ping (see notifyWebSubHub).
 const FEED_HEAD_SIZE = 10;
-const ORIGIN_TIMEOUT_MS = 2000;
 // Must match Pat.Aca.BlogServiceApi's MaxArticlesPageSize: the same clamp the
 // API applied to ?limit= when it still served the paginated list.
 const MAX_ARTICLES_PAGE_SIZE = 50;
@@ -738,12 +714,12 @@ const MAX_ARTICLES_PAGE_SIZE = 50;
 // timer push rewrites it within 5 minutes.
 const LIST_UNAVAILABLE_RETRY_AFTER_SECONDS = 300;
 
-/** True when two articles are identical apart from `viewCount`. Lets
- * writeDetailFallbackSnapshot below skip a KV write -- eventually-consistent,
- * per-write-limited, and offering no freshness benefit when the stored bytes
- * wouldn't change anyway -- for the common case where a background
- * revalidate just re-confirms already-cached content. That caller compares
- * `viewCount` itself. */
+/** True when two articles are identical apart from `viewCount`. Lets both
+ * `article:{slug}` writers (the detail push and a healing origin fetch) skip
+ * a KV write that would store the same bytes again. They compare `viewCount`
+ * themselves: since the hourly ViewCountFlushFunction became its only writer
+ * it changes at most once an hour per article that had views, so it is
+ * written. */
 function articleContentEquals(a: Article, b: Article): boolean {
   return (
     a.id === b.id &&
@@ -871,23 +847,61 @@ function listResponse(articles: Article[], extraHeaders: Record<string, string> 
   });
 }
 
-/** The full list for this request: the colo's cached copy while it was
- * checked against KV less than REVALIDATE_INTERVAL_MS ago, otherwise KV
- * (re-cached with a new checked-at). Falls back to an older cached copy
- * when KV has nothing, and returns null only when neither exists. */
-async function readListedArticles(env: Env, ctx: ExecutionContext, requestUrl: string): Promise<Response | null> {
-  const key = cacheKeyFor(LIST_PATH, '', requestUrl);
+/** The colo's cached response for `key` while it was read less than
+ * REVALIDATE_INTERVAL_MS ago, otherwise a fresh read of `kvKey` turned into
+ * a response by `toResponse` (re-cached when it's a 200, stamped with
+ * CACHED_AT_HEADER). With nothing in KV, an older cached copy is still
+ * served; null only when neither exists. */
+async function readThroughKv(
+  env: Env,
+  ctx: ExecutionContext,
+  key: Request,
+  kvKey: string,
+  toResponse: (stored: string) => Response,
+): Promise<Response | null> {
   const cached = await cache.match(key);
   if (cached && Date.now() - (Number(cached.headers.get(CACHED_AT_HEADER)) || 0) <= REVALIDATE_INTERVAL_MS) {
     return cached;
   }
 
-  const stored = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
-  if (!stored) return cached ?? null;
+  const stored = await env.ARTICLES_FALLBACK.get(kvKey);
+  if (stored === null) return cached ?? null;
 
-  const response = listResponse(parseFallbackSnapshot(stored).articles, { [CACHED_AT_HEADER]: String(Date.now()) });
-  ctx.waitUntil(cache.put(key, response.clone()));
+  const response = toResponse(stored);
+  if (response.ok) {
+    response.headers.set(CACHED_AT_HEADER, String(Date.now()));
+    ctx.waitUntil(cache.put(key, response.clone()));
+  }
   return response;
+}
+
+/** The full list for this request (see readThroughKv). */
+function readListedArticles(env: Env, ctx: ExecutionContext, requestUrl: string): Promise<Response | null> {
+  return readThroughKv(env, ctx, cacheKeyFor(LIST_PATH, '', requestUrl), FALLBACK_KV_KEY, (stored) =>
+    listResponse(parseFallbackSnapshot(stored).articles),
+  );
+}
+
+/** Whether `slug` is in the KV list: the only case where a missing per-slug
+ * snapshot is worth an origin call (a bug to heal, not a bot probing a slug
+ * that doesn't exist). */
+async function isListedSlug(env: Env, ctx: ExecutionContext, requestUrl: string, slug: string): Promise<boolean> {
+  const list = await readListedArticles(env, ctx, requestUrl);
+  return list !== null && ((await list.json()) as Article[]).some((article) => article.slug === slug);
+}
+
+/** The API hides an article until its publishedAt passes; so does every KV
+ * read here, which is why a scheduled article needs no push to go live. */
+function isPublished(publishedAt: string): boolean {
+  return Date.parse(publishedAt) <= Date.now();
+}
+
+/** Same status and shape as the API's own 404 problem+json. */
+function notFound(): Response {
+  return new Response(JSON.stringify({ title: 'Article not found', status: 404 }), {
+    status: 404,
+    headers: { 'Content-Type': 'application/problem+json', ...CORS_HEADERS },
+  });
 }
 
 /** One page of the list for infinite scroll's "load more", cut from the
@@ -933,29 +947,20 @@ async function proxyListRequest(env: Env, ctx: ExecutionContext, search: string,
   return articlesPage((await full.json()) as Article[], limit, params.get('after'));
 }
 
-// --- Durable detail fallback -------------------------------------------
+// --- Article page from KV ---------------------------------------------------
 //
-// Covers a colo that is cold for one specific article (backlog item filed
-// 2026-09-11: a heavily-edited article a reader clicked straight from the
-// home page landed on a colo that had never served that slug). Key
-// differences from the list snapshot: every article gets its own KV entry — no cap, no cutoff to pick,
-// since (unlike the list) there's no natural "latest N" that covers the
-// actual failure mode — written on every successful origin fetch (cold-miss
-// or background revalidate) whose content actually differs from what's
-// already stored (articleContentEquals plus `viewCount`); and the full
-// rendered `content` is kept, not blanked, since that's the entire point of
-// this route. `viewCount` used to be left out of the comparison, back when
-// the origin bumped it on every fetch, so the snapshot kept the count from
-// the last content edit (a cold colo showed 37 views while Cosmos had 70).
-// Since the hourly ViewCountFlushFunction became its only writer it changes
-// at most once an hour per article that had views. Reuses the same ARTICLES_FALLBACK namespace as the list
-// snapshot rather than provisioning a second KV namespace for what's the
-// same fallback purpose — a `article:{slug}` key prefix keeps the two from
-// ever colliding. Storage stays tiny at this blog's scale (one entry per
-// article ever fetched, a few KB each); write volume is bounded by real
-// content and view-count changes, not by traffic — a background revalidate
-// that re-fetches an unchanged article (the common case) costs one extra KV
-// read, not a write.
+// GET /articles/{slug} is served from its `article:{slug}` snapshot: one KV
+// entry per article, rendered HTML included, written by
+// ArticleDetailSyncFunction's push (its first run backfilled every article,
+// unlisted ones too) and, when a missing snapshot is healed, by an origin
+// fetch. Both writers skip unchanged content (see articleContentEquals), so
+// writes follow content changes, not traffic. Same ARTICLES_FALLBACK
+// namespace as the list; the `article:` prefix keeps them apart.
+//
+// viewCount reaches the snapshot through the same push: the hourly
+// ViewCountFlushFunction patches Cosmos, the Change Feed delivers that write,
+// and a viewCount-only change is written (see writeDetailFallbackSnapshotFromArticle),
+// so an article page shows the count as of the last flush.
 function detailFallbackKey(slug: string): string {
   return `article:${slug}`;
 }
@@ -984,101 +989,71 @@ async function writeDetailFallbackSnapshotFromArticle(env: Env, slug: string, ar
   await env.ARTICLES_FALLBACK.put(detailFallbackKey(slug), JSON.stringify(article));
 }
 
-async function readDetailFallbackSnapshot(env: Env, slug: string): Promise<Response | null> {
-  const stored = await env.ARTICLES_FALLBACK.get(detailFallbackKey(slug));
-  if (!stored) return null;
-  return new Response(stored, {
-    status: 200,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+/** GET /articles/{slug} from KV (see readThroughKv). Unknown and
+ * future-dated slugs are a 404, as on the API, without an origin call. */
+async function proxyArticleRequest(env: Env, ctx: ExecutionContext, pathname: string, requestUrl: string): Promise<Response> {
+  const slug = extractSlug(pathname);
+  const key = cacheKeyFor(pathname, '', requestUrl);
+  const response = await readThroughKv(env, ctx, key, detailFallbackKey(slug), (stored) => {
+    const article = JSON.parse(stored) as Article;
+    if (!isPublished(article.publishedAt)) return notFound();
+    return new Response(stored, { status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
   });
+  if (response) return response;
+
+  if (!(await isListedSlug(env, ctx, requestUrl, slug))) return notFound();
+  return healMissingArticle(env, ctx, pathname, key, slug);
 }
 
-/** Cold-miss handling for GET /articles/{slug}. Races the origin fetch
- * against ORIGIN_TIMEOUT_MS. If origin wins, the response is rendered,
- * cached and snapshotted as usual. If the timeout wins, or the fetch throws,
- * the per-slug durable snapshot is served while the origin fetch keeps
- * running in the background (ctx.waitUntil) and still updates the cache and
- * snapshot when it resolves. With no snapshot yet, this waits on origin. */
-async function fetchDetailWithFallback(
+/** A listed article without a snapshot: fetch it from origin once, which
+ * writes the snapshot, so the next read is a KV read again. */
+async function healMissingArticle(
   env: Env,
   ctx: ExecutionContext,
   pathname: string,
   key: Request,
   slug: string,
 ): Promise<Response> {
-  const originPromise = fetchAndRender(env, pathname, '').then(async ({ response, cacheable }) => {
-    if (cacheable) {
-      await cache.put(key, response.clone());
-      await writeDetailFallbackSnapshot(env, slug, response.clone());
-    }
-    return response;
-  });
-
-  type Outcome = { kind: 'origin'; response: Response } | { kind: 'unavailable' };
-  const settled: Promise<Outcome> = originPromise
-    .then((response): Outcome => ({ kind: 'origin', response }))
-    .catch((): Outcome => ({ kind: 'unavailable' }));
-  const timedOut: Promise<Outcome> = new Promise((resolve) => {
-    setTimeout(() => resolve({ kind: 'unavailable' }), ORIGIN_TIMEOUT_MS);
-  });
-
-  const winner = await Promise.race([settled, timedOut]);
-  if (winner.kind === 'origin') {
-    return winner.response;
-  }
-
-  ctx.waitUntil(originPromise.then(() => undefined).catch(() => undefined));
-
-  const fallback = await readDetailFallbackSnapshot(env, slug);
-  return fallback ?? originPromise;
-}
-
-/** Proxies GET /articles/{slug} to the API with stale-while-revalidate
- * caching: an existing cache entry is always served immediately; a
- * background refresh is kicked off (not awaited) only when it's older than
- * REVALIDATE_INTERVAL_MS. On a cold cache miss, races origin against the
- * per-slug durable KV fallback (see fetchDetailWithFallback above). The list
- * route never comes here (see proxyListRequest). */
-async function proxyArticlesRequest(
-  env: Env,
-  ctx: ExecutionContext,
-  pathname: string,
-  search: string,
-  requestUrl: string,
-): Promise<Response> {
-  const key = cacheKeyFor(pathname, search, requestUrl);
-
-  const cached = await cache.match(key);
-  if (cached) {
-    const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
-    if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
-      ctx.waitUntil(revalidate(env, pathname, search, key));
-    }
-    return cached;
-  }
-
-  if (ARTICLE_SLUG_PATH.test(pathname)) {
-    return fetchDetailWithFallback(env, ctx, pathname, key, extractSlug(pathname));
-  }
-
-  const { response, cacheable } = await fetchAndRender(env, pathname, search);
+  console.warn('article snapshot missing, healing from origin', slug);
+  const { response, cacheable } = await fetchAndRender(env, pathname, '');
   if (cacheable) {
     ctx.waitUntil(cache.put(key, response.clone()));
+    ctx.waitUntil(writeDetailFallbackSnapshot(env, slug, response.clone()));
   }
   return response;
 }
 
 // --- Comments --------------------------------------------------------------
 //
-// Unlike article reads, comments are never cached (SWR or otherwise) — a
-// reader's own freshly-submitted comment showing up promptly matters more
-// here than shaving an origin round trip off a low-traffic, highly dynamic
-// resource, and there's no cold-start-hiding motivation the way there was
-// for articles (comments aren't the thing a reader clicks straight from a
-// LinkedIn link). Both directions attach the shared ARTICLES_API_KEY, same
-// as every article request.
+// GET /articles/{slug}/comments is read from the published-comments KV key
+// (see "Comments sync"): ui-worker asks for it on every article page render,
+// so going to origin here woke the container on every article view. A new
+// comment is queued for moderation anyway, so it only shows once published,
+// and the push follows that within seconds. POST still goes to the API.
+//
+// Before the first push (no key yet) GET falls back to origin.
 
-/** GET /articles/{slug}/comments passthrough — no Markdown rendering (unlike
+/** Published comments for one article from KV, [] when it has none. */
+async function proxyCommentsRequest(env: Env, ctx: ExecutionContext, pathname: string, requestUrl: string): Promise<Response> {
+  const slug = pathname.slice(LIST_PATH.length + 1, -'/comments'.length);
+  const response = await readThroughKv(env, ctx, cacheKeyFor(PUBLISHED_COMMENTS_PATH_KEY, '', requestUrl), PUBLISHED_COMMENTS_KV_KEY, (stored) =>
+    new Response(stored, { status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }),
+  );
+  if (!response) return proxyCommentsGet(env, pathname);
+
+  const bySlug = (await response.json()) as Record<string, unknown[]>;
+  return new Response(JSON.stringify(bySlug[slug] ?? []), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+  });
+}
+
+// Cache key for the whole published-comments map: one per colo, not one
+// per article, since it's one KV key.
+const PUBLISHED_COMMENTS_PATH_KEY = '/internal/cache/published-comments';
+
+/** GET /articles/{slug}/comments from origin, used only until the first
+ * comments push — no Markdown rendering (unlike
  * articles' `content`, a comment's `text` is always plain text), so this
  * just forwards the API's JSON response body/status as-is. */
 async function proxyCommentsGet(env: Env, pathname: string): Promise<Response> {
@@ -1174,7 +1149,7 @@ export default {
     }
 
     if (ARTICLE_COMMENTS_PATH.test(pathname)) {
-      return proxyCommentsGet(env, pathname);
+      return proxyCommentsRequest(env, ctx, pathname, request.url);
     }
 
     // Checked before the generic /articles dispatch below -- ARTICLE_SLUG_PATH
@@ -1192,11 +1167,11 @@ export default {
     // Also checked before the generic dispatch -- these serve raw Markdown,
     // never the rendered-HTML shape fetchAndRender produces.
     if (pathname === ABOUT_MD_PATH) {
-      return proxyArticleMarkdownRequest(env, ctx, ABOUT_SLUG, cacheKeyFor(pathname, search, request.url));
+      return proxyArticleMarkdownRequest(env, ctx, ABOUT_SLUG, cacheKeyFor(pathname, '', request.url), request.url);
     }
     const mdMatch = pathname.match(ARTICLE_MD_PATH);
     if (mdMatch) {
-      return proxyArticleMarkdownRequest(env, ctx, mdMatch[1], cacheKeyFor(pathname, search, request.url));
+      return proxyArticleMarkdownRequest(env, ctx, mdMatch[1], cacheKeyFor(pathname, '', request.url), request.url);
     }
 
     // The list, plain or paginated (?limit=&after=), comes from KV only.
@@ -1204,10 +1179,9 @@ export default {
       return proxyListRequest(env, ctx, search, request.url);
     }
 
-    // The detail route still goes to origin. The API ignores a query string
-    // there, so it's passed through without a special case.
+    // An article page, from KV too. A query string is ignored, as on the API.
     if (ARTICLE_SLUG_PATH.test(pathname)) {
-      return proxyArticlesRequest(env, ctx, pathname, search, request.url);
+      return proxyArticleRequest(env, ctx, pathname, request.url);
     }
 
     return new Response('Not found', { status: 404, headers: CORS_HEADERS });
