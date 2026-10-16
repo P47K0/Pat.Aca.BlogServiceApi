@@ -59,3 +59,13 @@ RUN curl -fsSL --retry 5 --retry-all-errors -o /tmp/dotnet-install.sh https://do
  && dotnet --version
 
 USER runner
+
+# What az would otherwise download in every job: the Bicep CLI (az deployment group create with a
+# .bicep file, in the Cosmos DB and Comments Function Infra workflows) and the containerapp extension
+# (the Deploy workflow). Both go into ~/.azure, which azure/login keeps.
+RUN az bicep install && az extension add --name containerapp --only-show-errors
+
+# start-runner.ps1 mounts a named volume here, so NuGet packages survive between jobs. Created in the
+# image so the new volume belongs to runner rather than root. Not baked into the image: the Functions
+# SDK picks some packages from the source at build time, and every package bump would need a rebuild.
+RUN mkdir -p /home/runner/.nuget/packages

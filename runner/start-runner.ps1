@@ -99,8 +99,10 @@ $slotLoop = {
     $started = Get-Date
     # Docker Desktop's socket, for the Deploy workflow's image build (docker/build-push-action). It belongs to
     # root:root inside the container, so the runner user joins group 0 to use it.
+    # blog-runner-nuget keeps NuGet packages between jobs (see runner/Dockerfile).
     docker run --rm --name $name --label "blog-runner.session=$Session" `
       -v /var/run/docker.sock:/var/run/docker.sock --group-add 0 `
+      -v blog-runner-nuget:/home/runner/.nuget/packages `
       $Image ./run.sh --jitconfig $jit.encoded_jit_config |
       ForEach-Object { "[$Slot] $_" }
     if ($LASTEXITCODE -ne 0 -and ((Get-Date) - $started).TotalSeconds -lt 30) {
