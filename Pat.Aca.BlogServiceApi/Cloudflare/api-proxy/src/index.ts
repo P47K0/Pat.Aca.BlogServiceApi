@@ -104,13 +104,9 @@ const CACHED_AT_HEADER = 'X-Swr-Cached-At';
 // what's ultimately a soft rate-limit on re-checking origin.
 const cache = caches.default;
 
-/** Cache key. Includes the query string — needed since GET /articles?limit=
- * &after= (infinite-scroll pagination, below) is a genuinely different
- * response per combination of params, unlike every other route/request this
- * Worker has ever served, which never varied by query string. The plain
- * `/articles` and `/articles/{slug}` requests (home page, tag pages,
- * sitemap.xml, feed.xml) never carry a query string, so their cache key is
- * unchanged — this only starts mattering for the new paginated requests. */
+/** Cache key. Includes the query string, which the routes cached here never
+ * carry in practice. Paginated list requests (?limit=&after=) are cut from
+ * the full list's own cache entry instead (see proxyListRequest). */
 function cacheKeyFor(pathname: string, search: string, requestUrl: string): Request {
   return new Request(new URL(pathname + search, requestUrl).toString(), { method: 'GET' });
 }
@@ -200,11 +196,6 @@ interface UpstreamResult {
   cacheable: boolean;
 }
 
-// Forwarded from the API's response as-is when present — the infinite-scroll
-// "load more" pagination signal (see GET /articles?limit=&after= on the API
-// side). Absent entirely on an unpaginated request, same as today.
-const PAGINATION_HEADERS = ['X-Has-More', 'X-Next-Cursor'];
-
 /** Fetches from the API, attaching the shared API key, and — for successful
  * JSON responses only — rewrites each article's `content` from Markdown to
  * HTML. Error responses (the API's RFC 7807 problem+json for 401/404/429/500)
@@ -237,20 +228,14 @@ async function fetchAndRender(env: Env, pathname: string, search: string): Promi
     ? (body as Article[]).map(renderArticleContent)
     : renderArticleContent(body as Article);
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    [CACHED_AT_HEADER]: String(Date.now()),
-    ...CORS_HEADERS,
-  };
-  for (const name of PAGINATION_HEADERS) {
-    const value = upstreamResponse.headers.get(name);
-    if (value !== null) headers[name] = value;
-  }
-
   return {
     response: new Response(JSON.stringify(rendered), {
       status: upstreamResponse.status,
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+        [CACHED_AT_HEADER]: String(Date.now()),
+        ...CORS_HEADERS,
+      },
     }),
     cacheable: true,
   };
@@ -265,13 +250,9 @@ async function revalidate(env: Env, pathname: string, search: string, key: Reque
   if (cacheable) {
     // Snapshot from a clone *before* cache.put() gets the original — put()
     // consumes the response body, so cloning after would be too late. Only
-    // the plain (unpaginated) list request updates the durable "latest 10"
-    // snapshot — a paginated page's background refresh has no business
-    // overwriting it with a partial slice. Article detail requests update
-    // their own per-slug snapshot instead (see writeDetailFallbackSnapshot).
-    if (pathname === LIST_PATH && search === '') {
-      await writeFallbackSnapshot(env, response.clone());
-    } else if (ARTICLE_SLUG_PATH.test(pathname)) {
+    // article detail requests get here with a durable snapshot to update;
+    // the list never revalidates against origin (see "Article list from KV").
+    if (ARTICLE_SLUG_PATH.test(pathname)) {
       await writeDetailFallbackSnapshot(env, extractSlug(pathname), response.clone());
     }
     await cache.put(key, response);
@@ -441,16 +422,13 @@ async function handleMostViewedArticleSync(request: Request, env: Env): Promise<
 //
 // Backs the "Blog auto update: Cosmos DB Change Feed -> Azure Function ->
 // Worker/KV" backlog item: ArticleListSyncFunction reacts to every write on
-// the Articles container and pushes a freshly-recomputed latest-articles
-// list here, so the durable snapshot (see "Durable list fallback" above)
-// reflects a Cosmos write near-real-time instead of waiting on the next
-// request-driven revalidate (up to REVALIDATE_INTERVAL_MS stale) or cold-miss
-// to notice it. Writes into the exact same FALLBACK_KV_KEY snapshot the
-// list route's own SWR/fallback machinery reads from and writes to —
-// fresherFallbackResponse, readFallbackSnapshot, and every reader of that
-// key need no changes at all: this is just a second producer of a shape
-// that already exists, using the same writeFallbackSnapshotFromArticles
-// sort/cap/dedupe/writtenAt logic as the request-driven writer.
+// the Articles container, and ArticleListTimerSyncFunction runs every 5
+// minutes (scheduled articles going live, deletes), and both push the full
+// recomputed list here. Since the "Stop reader-triggered ACA calls for the
+// article list route" item this is the ONLY producer of FALLBACK_KV_KEY,
+// and that key is the only source GET /articles is served from (see
+// "Article list from KV" below): no reader request reaches origin for the
+// list any more.
 //
 // Reuses the article-count sync's own shared secret (same reasoning as
 // most-viewed-article's sync) rather than a third one.
@@ -595,52 +573,38 @@ async function proxyArticleMarkdownRequest(
   return response;
 }
 
-// --- Durable list fallback --------------------------------------------------
+// --- Article list from KV --------------------------------------------------
 //
-// The Cache API above is per-colo and can be empty for a route even on a
-// long-lived site — a colo that just hasn't seen traffic for it, or an entry
-// Cloudflare evicted. On that cold miss, the code below used to fall straight
-// through to a synchronous origin fetch with nothing to serve — fine for a
-// merely slow cold start (~30s, measured), but the visitor pays every second
-// of it. This durable, non-per-colo fallback (Cloudflare KV — global reads,
-// no colo blind spots) exists specifically to cover that gap for the article
-// LIST route only: whenever a full list fetch from origin succeeds, every
-// listed article's metadata (no `content` — the list view never needs
-// it, and there's no reason to multiply origin load fetching bodies nobody
-// may click) gets written here. Until 2026-10-16 this held only the 10
-// newest (key `latest-10`); a fresher 10-item snapshot then replaced a
-// colo's cached full list after every article write, so the homepage tag
-// cloud showed 36 of 152 tags. The full list is ~150-200 KB, far under KV's
-// 25 MB value limit. If a live origin fetch for the list is slow
-// past ORIGIN_TIMEOUT_MS or fails outright, this snapshot is served instead.
+// GET /articles (plain and paginated) is served from the durable
+// FALLBACK_KV_KEY snapshot only, never from origin. Before 2026-10, every
+// colo revalidated the list against origin once per REVALIDATE_INTERVAL_MS
+// and raced origin on a cold miss, so bot traffic across many colos kept
+// waking the scale-to-zero Container App (~30s cold start) just to confirm
+// an unchanged list. The snapshot is pushed by ArticleListSyncFunction on
+// every Cosmos write and by ArticleListTimerSyncFunction every 5 minutes
+// (see "Article list sync" below), so it is already the freshest copy there
+// is. It holds every listed article's metadata, no `content` (the list view
+// never needs it): ~150-200 KB, far under KV's 25 MB value limit.
 //
-// Originally scoped to the list route only — the article detail route (GET
-// /articles/{slug}) relied on the per-route Cache API SWR caching above being
-// enough on its own. Extended to individual articles too as of the backlog
-// item filed 2026-09-11 (see the "Durable detail fallback" section below):
-// that per-colo caching isn't actually enough, because a colo can be cold for
-// one *specific* article even when it's not brand-new and other colos already
-// have it cached — happened in production to a heavily-edited article a
-// reader clicked straight from the home page onto a colo that had simply
-// never served that slug before.
+// The per-colo Cache API still sits in front, so a busy colo reads KV at
+// most once per REVALIDATE_INTERVAL_MS rather than on every request.
+//
+// The article detail route (GET /articles/{slug}) still goes to origin, with
+// its own per-slug durable fallback (see "Durable detail fallback" below):
+// that is the separate "Extend Change-Feed push to individual article detail
+// pages" backlog item.
 const LIST_PATH = '/articles';
 const FALLBACK_KV_KEY = 'article-list';
-// The pre-2026-10-16 snapshot of only the 10 newest articles. Read by
-// readFallbackSnapshot only while FALLBACK_KV_KEY doesn't exist yet (the
-// first minutes after deploy), never preferred over a colo's own cache.
-// Can go, together with LIST_PARTIAL_HEADER, once FALLBACK_KV_KEY is written.
-const LEGACY_FALLBACK_KV_KEY = 'latest-10';
 // How many of the newest articles count as "the feed's newest items" for
 // the WebSub ping (see notifyWebSubHub).
 const FEED_HEAD_SIZE = 10;
 const ORIGIN_TIMEOUT_MS = 2000;
-
-// Set on a list response served from LEGACY_FALLBACK_KV_KEY, which holds only
-// the 10 newest articles. Lets a consumer that needs the complete list
-// (ui-worker's sitemap.xml) tell it apart from a real origin response
-// instead of silently publishing 10 URLs. FALLBACK_KV_KEY holds the full
-// list, so responses served from it don't carry the header.
-const LIST_PARTIAL_HEADER = 'X-List-Partial';
+// Must match Pat.Aca.BlogServiceApi's MaxArticlesPageSize: the same clamp the
+// API applied to ?limit= when it still served the paginated list.
+const MAX_ARTICLES_PAGE_SIZE = 50;
+// Retry-After on the 503 served when FALLBACK_KV_KEY doesn't exist. The
+// timer push rewrites it within 5 minutes.
+const LIST_UNAVAILABLE_RETRY_AFTER_SECONDS = 300;
 
 /** True when two articles are identical apart from `viewCount` -- which the
  * origin bumps on every fetch by design (see this file's top-of-file SWR
@@ -668,35 +632,23 @@ function articleContentEquals(a: Article, b: Article): boolean {
   );
 }
 
-/** Stored shape for FALLBACK_KV_KEY. `writtenAt` (this Worker's own clock,
- * matching CACHED_AT_HEADER's epoch-ms convention) lets a reader on a
- * different, stale-cached colo tell whether this durable snapshot -- global,
- * unlike the per-colo Cache API entry above -- already reflects a fresher
- * confirmed state than what it has locally, per fresherFallbackResponse
- * below. */
+/** Stored shape for FALLBACK_KV_KEY. `writtenAt` is this Worker's own clock
+ * (epoch ms) at the last write that changed the list. */
 interface FallbackSnapshot {
   writtenAt: number;
   articles: Article[];
 }
 
-/** Parses a stored FALLBACK_KV_KEY value, tolerating the pre-writtenAt shape
- * (a bare Article[]) that's still sitting in KV until this Worker's next
- * successful write replaces it -- treated as maximally stale (writtenAt: 0)
- * so fresherFallbackResponse never prefers it over a colo's own cache, while
- * readFallbackSnapshot's genuine-fallback use still reads it unchanged. */
 function parseFallbackSnapshot(raw: string): FallbackSnapshot {
-  const parsed = JSON.parse(raw);
-  return Array.isArray(parsed) ? { writtenAt: 0, articles: parsed as Article[] } : (parsed as FallbackSnapshot);
+  return JSON.parse(raw) as FallbackSnapshot;
 }
 
-/** True when two list entries match on the fields both FALLBACK_KV_KEY
- * producers supply. ArticleListSyncFunction's push carries only these
- * (no content, viewCount changes on every origin fetch, and no
- * api-proxy-rendered footer), so comparing everything articleContentEquals
- * does would make every push, and the origin fetch after it, look like a
- * change and write KV. publishedAt is compared as an instant, since the
- * Function forwards Cosmos's stored string as-is; optional fields compare
- * missing and null as equal, since the origin and the Function differ there.
+/** True when two list entries match on the fields ArticleListSyncFunction's
+ * push carries. viewCount is left out on purpose: it changes on every
+ * article read, so comparing it would make nearly every push a KV write.
+ * publishedAt is compared as an instant, since the Function forwards
+ * Cosmos's stored string as-is; optional fields compare missing and null as
+ * equal.
  * The series/related fields and updatedAt count too: ui-worker reads them
  * off list items (series nav, related links, sitemap lastmod), so a pushed
  * list without them must not be treated as equal to one with them. */
@@ -723,12 +675,9 @@ function instantOrNull(value: string | null | undefined): number | null {
   return value ? Date.parse(value) : null;
 }
 
-/** Shared by both writers of FALLBACK_KV_KEY: a successful origin list fetch
- * (writeFallbackSnapshot below) and ArticleListSyncFunction's Change-Feed-
- * driven push (handleArticleListSync, see "Article list sync" below) — same
- * sort/dedupe/writtenAt logic regardless of which one is calling, so the
- * two producers can never disagree about what a "fresh enough to write"
- * snapshot looks like. */
+/** The one writer of FALLBACK_KV_KEY, called by handleArticleListSync (see
+ * "Article list sync" below). Sorts newest-first and skips the write when
+ * the list didn't change, so an unchanged timer push costs one KV read. */
 async function writeFallbackSnapshotFromArticles(env: Env, articles: Article[]): Promise<void> {
   const sorted = [...articles]
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
@@ -758,9 +707,8 @@ function listsEqual(a: Article[], b: Article[]): boolean {
 // instead of on their next poll. The hub refetches the feed itself after a
 // ping. Pinged from writeFallbackSnapshotFromArticles when the newest
 // FEED_HEAD_SIZE entries of the snapshot change: "the feed's newest items
-// changed", from
-// either producer: ArticleListSyncFunction's push, or an origin fetch that
-// notices a scheduled article going live.
+// changed", from the Change Feed push or the timer push that notices a
+// scheduled article going live.
 const WEBSUB_HUB_URL = 'https://pubsubhubbub.appspot.com/';
 const FEED_URL = 'https://blog.koorevaar.com/feed.xml';
 
@@ -781,133 +729,81 @@ async function notifyWebSubHub(): Promise<void> {
   }
 }
 
-async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<void> {
-  const articles = (await listResponse.json()) as Article[];
-  await writeFallbackSnapshotFromArticles(env, articles);
+function listResponse(articles: Article[], extraHeaders: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(articles), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', ...extraHeaders, ...CORS_HEADERS },
+  });
 }
 
-async function readFallbackSnapshot(env: Env): Promise<Response | null> {
+/** The full list for this request: the colo's cached copy while it was
+ * checked against KV less than REVALIDATE_INTERVAL_MS ago, otherwise KV
+ * (re-cached with a new checked-at). Falls back to an older cached copy
+ * when KV has nothing, and returns null only when neither exists. */
+async function readListedArticles(env: Env, ctx: ExecutionContext, requestUrl: string): Promise<Response | null> {
+  const key = cacheKeyFor(LIST_PATH, '', requestUrl);
+  const cached = await cache.match(key);
+  if (cached && Date.now() - (Number(cached.headers.get(CACHED_AT_HEADER)) || 0) <= REVALIDATE_INTERVAL_MS) {
+    return cached;
+  }
+
   const stored = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
-  if (stored) {
-    return new Response(JSON.stringify(parseFallbackSnapshot(stored).articles), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+  if (!stored) return cached ?? null;
+
+  const response = listResponse(parseFallbackSnapshot(stored).articles, { [CACHED_AT_HEADER]: String(Date.now()) });
+  ctx.waitUntil(cache.put(key, response.clone()));
+  return response;
+}
+
+/** One page of the list for infinite scroll's "load more", cut from the
+ * same KV list the first page came from. Same contract as the API's
+ * GET /articles?limit=&after= used to have: `after` is the previous page's
+ * last slug (an unknown slug starts from page one), limit is clamped to
+ * 1..MAX_ARTICLES_PAGE_SIZE, and X-Has-More/X-Next-Cursor carry the next
+ * cursor. */
+function articlesPage(articles: Article[], limit: number, after: string | null): Response {
+  const clamped = Math.min(Math.max(limit, 1), MAX_ARTICLES_PAGE_SIZE);
+  const afterIndex = after ? articles.findIndex((article) => article.slug === after) : -1;
+  const start = afterIndex + 1;
+  const page = articles.slice(start, start + clamped);
+  const hasMore = start + clamped < articles.length;
+
+  const headers: Record<string, string> = { 'X-Has-More': hasMore ? 'true' : 'false' };
+  if (hasMore) headers['X-Next-Cursor'] = page[page.length - 1].slug;
+  return listResponse(page, headers);
+}
+
+/** GET /articles and GET /articles?limit=&after=, from KV only (see
+ * "Article list from KV" above). Without `limit` the full list is returned,
+ * matching the API, which also ignored `after` on its own. */
+async function proxyListRequest(env: Env, ctx: ExecutionContext, search: string, requestUrl: string): Promise<Response> {
+  const full = await readListedArticles(env, ctx, requestUrl);
+  if (!full) {
+    // Only when FALLBACK_KV_KEY was deleted: the timer push rewrites it.
+    // ui-worker turns this into its own 503 + Retry-After page.
+    return new Response(null, {
+      status: 503,
+      headers: { 'Retry-After': String(LIST_UNAVAILABLE_RETRY_AFTER_SECONDS), ...CORS_HEADERS },
     });
   }
 
-  const legacy = await env.ARTICLES_FALLBACK.get(LEGACY_FALLBACK_KV_KEY);
-  if (!legacy) return null;
-  return new Response(JSON.stringify(parseFallbackSnapshot(legacy).articles), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json', [LIST_PARTIAL_HEADER]: 'true', ...CORS_HEADERS },
-  });
-}
+  const params = new URLSearchParams(search);
+  const limitParam = params.get('limit');
+  if (limitParam === null) return full;
 
-/** Addresses the "api-proxy cache can serve a very stale article list"
- * backlog item (filed 2026-09-06): a colo's own per-colo Cache API entry only
- * ever gets rechecked against origin when a request actually lands on it past
- * REVALIDATE_INTERVAL_MS -- a colo nobody hits just sits stale indefinitely,
- * with nothing proactively refreshing it. This durable snapshot, by contrast,
- * gets refreshed (see writeFallbackSnapshot) by *any* colo's successful
- * revalidate or cold-miss fetch, so at real traffic levels it's almost always
- * fresher than one specific idle colo's own copy.
- *
- * Called only once a cache hit is already past REVALIDATE_INTERVAL_MS -- i.e.
- * exactly the case that used to just serve the (possibly long-)stale
- * per-colo copy while kicking a background revalidate for next time. If the
- * durable snapshot is newer than this colo's own cached-at, serve it instead,
- * immediately, rather than making this one request eat the full staleness gap
- * that accumulated while this colo had no traffic. Returns null (falls
- * through to the previous behavior) when there's nothing newer to offer --
- * cheap either way: one extra KV read, not a write. Content-blanked, same as
- * every other use of this snapshot -- accepted already since the list view
- * never needs it (see the "Durable list fallback" section above). Only
- * FALLBACK_KV_KEY counts here, never the partial legacy key: serving a
- * 10-item snapshot over a cached full list is the bug this key fixed. */
-async function fresherFallbackResponse(env: Env, cachedAt: number): Promise<Response | null> {
-  const stored = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
-  if (!stored) return null;
-
-  const snapshot = parseFallbackSnapshot(stored);
-  if (snapshot.writtenAt <= cachedAt) return null;
-
-  return new Response(JSON.stringify(snapshot.articles), {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json',
-      [CACHED_AT_HEADER]: String(snapshot.writtenAt),
-      ...CORS_HEADERS,
-    },
-  });
-}
-
-/** Cold-miss handling for the plain (unpaginated) list request only — never
- * called for a paginated `?limit=&after=` request (see proxyArticlesRequest):
- * the durable snapshot only ever holds the full unpaginated shape, so it
- * has nothing to offer a specific page/cursor. Infinite-scroll's "load more"
- * requests fall through to the plain cache/fetch path below instead, with no
- * durable-fallback protection — an accepted gap, since that's a progressive
- * enhancement on top of an already-rendered page, not the critical first
- * paint this fallback exists to protect.
- *
- * Races the real origin fetch against ORIGIN_TIMEOUT_MS. If origin wins,
- * behaves exactly like the normal path (render, cache, snapshot). If the
- * timeout wins — or the fetch throws — and a durable snapshot exists, that's
- * served immediately while the real fetch keeps running in the background
- * (still updating the Cache API entry and the snapshot whenever it does
- * eventually resolve). If there's no snapshot yet (e.g. very first request
- * ever), this just falls back to waiting on origin, same as before this
- * feature existed. */
-async function fetchListWithFallback(
-  env: Env,
-  ctx: ExecutionContext,
-  key: Request,
-): Promise<Response> {
-  const originPromise = fetchAndRender(env, LIST_PATH, '').then(async ({ response, cacheable }) => {
-    if (cacheable) {
-      // Snapshot from clones taken while the body is still unread — both put()
-      // and the eventual `return response` each need their own intact copy.
-      await cache.put(key, response.clone());
-      await writeFallbackSnapshot(env, response.clone());
-    }
-    return response;
-  });
-
-  // Never rejects: a thrown fetch (network error, DNS failure, timeout at the
-  // platform level, etc.) becomes an 'unavailable' outcome exactly like a slow
-  // origin hitting ORIGIN_TIMEOUT_MS, so both funnel into the same fallback
-  // path below instead of throwing out of Promise.race.
-  type Outcome = { kind: 'origin'; response: Response } | { kind: 'unavailable' };
-  const settled: Promise<Outcome> = originPromise
-    .then((response): Outcome => ({ kind: 'origin', response }))
-    .catch((): Outcome => ({ kind: 'unavailable' }));
-  const timedOut: Promise<Outcome> = new Promise((resolve) => {
-    setTimeout(() => resolve({ kind: 'unavailable' }), ORIGIN_TIMEOUT_MS);
-  });
-
-  const winner = await Promise.race([settled, timedOut]);
-  if (winner.kind === 'origin') {
-    return winner.response;
+  const limit = Number(limitParam);
+  if (!Number.isInteger(limit)) {
+    return new Response(null, { status: 400, headers: CORS_HEADERS });
   }
-
-  // Origin is slower than we're willing to make a visitor wait for, or it
-  // failed outright — let it keep running in the background so the cache and
-  // snapshot still get updated if/when it does resolve, but don't block this
-  // response on it.
-  ctx.waitUntil(originPromise.then(() => undefined).catch(() => undefined));
-
-  const fallback = await readFallbackSnapshot(env);
-  // No snapshot yet (e.g. the very first request ever) — nothing to fall back
-  // to, so wait on origin after all, same as before this feature existed.
-  return fallback ?? originPromise;
+  return articlesPage((await full.json()) as Article[], limit, params.get('after'));
 }
 
 // --- Durable detail fallback -------------------------------------------
 //
-// Same mechanism as the list fallback above, extended to individual articles
-// per the backlog item filed 2026-09-11 (see the LIST_PATH comment above for
-// the production incident that motivated it). Key differences from the list
-// snapshot: every article gets its own KV entry — no cap, no cutoff to pick,
+// Covers a colo that is cold for one specific article (backlog item filed
+// 2026-09-11: a heavily-edited article a reader clicked straight from the
+// home page landed on a colo that had never served that slug). Key
+// differences from the list snapshot: every article gets its own KV entry — no cap, no cutoff to pick,
 // since (unlike the list) there's no natural "latest N" that covers the
 // actual failure mode — written on every successful origin fetch (cold-miss
 // or background revalidate) whose content actually differs from what's
@@ -952,12 +848,12 @@ async function readDetailFallbackSnapshot(env: Env, slug: string): Promise<Respo
   });
 }
 
-/** Cold-miss handling for GET /articles/{slug} — mirrors fetchListWithFallback
- * exactly (same race against ORIGIN_TIMEOUT_MS, same background continuation
- * via ctx.waitUntil on a timeout/failure, same "no snapshot yet → wait on
- * origin" bottom-out); see that function's doc comment for the full
- * mechanism. The only difference is the fallback key is per-slug here rather
- * than the single fixed list key. */
+/** Cold-miss handling for GET /articles/{slug}. Races the origin fetch
+ * against ORIGIN_TIMEOUT_MS. If origin wins, the response is rendered,
+ * cached and snapshotted as usual. If the timeout wins, or the fetch throws,
+ * the per-slug durable snapshot is served while the origin fetch keeps
+ * running in the background (ctx.waitUntil) and still updates the cache and
+ * snapshot when it resolves. With no snapshot yet, this waits on origin. */
 async function fetchDetailWithFallback(
   env: Env,
   ctx: ExecutionContext,
@@ -992,24 +888,12 @@ async function fetchDetailWithFallback(
   return fallback ?? originPromise;
 }
 
-/** Proxies a GET to the API with stale-while-revalidate caching: an existing
- * cache entry is always served immediately; a background refresh is kicked
- * off (not awaited) only when it's older than REVALIDATE_INTERVAL_MS. On a
- * cold cache miss, fetches synchronously (nothing to serve yet) and seeds
- * the cache for next time — except the *plain* list route (no query string)
- * and any article detail route, both of which race that fetch against a
- * durable KV fallback instead (see fetchListWithFallback/
- * fetchDetailWithFallback above). A paginated list request
- * (`/articles?limit=&after=`, infinite scroll's "load more") gets its own
- * cache entry via the query-string-aware cache key, but no durable fallback —
- * it's progressive enhancement on top of an already-rendered page, not the
- * critical first paint the fallback exists to protect.
- *
- * For the plain list route specifically, a past-interval hit first checks
- * fresherFallbackResponse before falling back to serving its own stale copy —
- * see that function's doc comment for why (the "stale article list" backlog
- * item: a background revalidate alone only helps colos that actually receive
- * traffic). */
+/** Proxies GET /articles/{slug} to the API with stale-while-revalidate
+ * caching: an existing cache entry is always served immediately; a
+ * background refresh is kicked off (not awaited) only when it's older than
+ * REVALIDATE_INTERVAL_MS. On a cold cache miss, races origin against the
+ * per-slug durable KV fallback (see fetchDetailWithFallback above). The list
+ * route never comes here (see proxyListRequest). */
 async function proxyArticlesRequest(
   env: Env,
   ctx: ExecutionContext,
@@ -1018,27 +902,14 @@ async function proxyArticlesRequest(
   requestUrl: string,
 ): Promise<Response> {
   const key = cacheKeyFor(pathname, search, requestUrl);
-  const isPlainList = pathname === LIST_PATH && search === '';
 
   const cached = await cache.match(key);
   if (cached) {
     const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER)) || 0;
     if (Date.now() - cachedAt > REVALIDATE_INTERVAL_MS) {
-      if (isPlainList) {
-        const fresher = await fresherFallbackResponse(env, cachedAt);
-        if (fresher) {
-          ctx.waitUntil(cache.put(key, fresher.clone()));
-          ctx.waitUntil(revalidate(env, pathname, search, key));
-          return fresher;
-        }
-      }
       ctx.waitUntil(revalidate(env, pathname, search, key));
     }
     return cached;
-  }
-
-  if (isPlainList) {
-    return fetchListWithFallback(env, ctx, key);
   }
 
   if (ARTICLE_SLUG_PATH.test(pathname)) {
@@ -1175,12 +1046,14 @@ export default {
       return proxyArticleMarkdownRequest(env, ctx, mdMatch[1], cacheKeyFor(pathname, search, request.url));
     }
 
-    // Routes mirror the API's exactly: /articles and /articles/{slug}. Only
-    // /articles ever carries a query string (?limit=&after=, infinite
-    // scroll's pagination) — the API ignores/doesn't expect one on the
-    // detail route, so it's passed through here regardless without a
-    // special case.
-    if (pathname === '/articles' || ARTICLE_SLUG_PATH.test(pathname)) {
+    // The list, plain or paginated (?limit=&after=), comes from KV only.
+    if (pathname === LIST_PATH) {
+      return proxyListRequest(env, ctx, search, request.url);
+    }
+
+    // The detail route still goes to origin. The API ignores a query string
+    // there, so it's passed through without a special case.
+    if (ARTICLE_SLUG_PATH.test(pathname)) {
       return proxyArticlesRequest(env, ctx, pathname, search, request.url);
     }
 

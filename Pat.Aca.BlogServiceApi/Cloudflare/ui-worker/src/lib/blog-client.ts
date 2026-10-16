@@ -9,22 +9,11 @@ async function fetchFromProxy(env: Env, path: string, accept = 'application/json
 /** Fetches all articles from api-proxy, newest-first (api-proxy/the API
  * already sort and exclude future-dated articles — no re-filtering here). */
 export async function getArticles(env: Env): Promise<Article[]> {
-  return (await getArticlesWithCompleteness(env)).articles;
-}
-
-/** Like getArticles(), but also reports whether api-proxy served its
- * legacy latest-10 KV snapshot instead of the full list. Since api-proxy
- * stores the full list in KV this only happens before that key exists. Only callers that must not publish a truncated list (sitemap.xml)
- * need this; pages that show the first few articles are fine with either. */
-export async function getArticlesWithCompleteness(env: Env): Promise<{ articles: Article[]; partial: boolean }> {
   const response = await fetchFromProxy(env, '/articles');
   if (!response.ok) {
     throw new UpstreamError(`GET /articles failed with status ${response.status}`, response.headers.get('Retry-After'));
   }
-  return {
-    articles: await response.json(),
-    partial: response.headers.get('X-List-Partial') === 'true',
-  };
+  return response.json();
 }
 
 export interface ArticlesPage {
