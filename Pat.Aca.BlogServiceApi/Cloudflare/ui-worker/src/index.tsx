@@ -363,7 +363,8 @@ app.get('/BingSiteAuth.xml', (c) =>
 // link discovery — built straight from the same getArticles() list the home
 // page already fetches, no new data needed.
 //
-// When api-proxy could only offer its latest-10 snapshot, answer 503 instead
+// When api-proxy could only offer its legacy latest-10 snapshot (only until
+// its full-list KV key exists, see LEGACY_FALLBACK_KV_KEY), answer 503 instead
 // of a 10-URL sitemap: a crawler keeps its last good copy and retries, while
 // a short sitemap reads as "the other articles are gone". The background
 // origin fetch api-proxy started refills its cache well within Retry-After.

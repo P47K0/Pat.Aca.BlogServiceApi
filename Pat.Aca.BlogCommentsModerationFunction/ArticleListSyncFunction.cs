@@ -7,7 +7,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// The Cosmos DB Change Feed trigger behind the "Blog auto update"
     /// backlog item -- fires on every write to the Articles container
     /// (create, update, an Unlisted toggle) and pushes a freshly-recomputed
-    /// latest-articles list into api-proxy's durable KV snapshot via
+    /// full article list into api-proxy's durable KV snapshot via
     /// ArticleListSyncProcessor, near-real-time rather than waiting for the
     /// next request-driven revalidate/cold-miss to notice the write.
     ///
@@ -49,7 +49,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
             IReadOnlyList<ArticleChangeFeedDocument> changes)
         {
             logger.LogInformation(
-                "Articles Change Feed delivered {Count} change(s), syncing latest-articles list once for the batch.",
+                "Articles Change Feed delivered {Count} change(s), syncing full article list once for the batch.",
                 changes.Count);
 
             await processor.SyncAsync();

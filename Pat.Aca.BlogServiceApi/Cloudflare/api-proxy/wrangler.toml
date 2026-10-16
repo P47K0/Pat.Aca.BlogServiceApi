@@ -21,7 +21,7 @@ compatibility_date = "2026-08-25"
 API_BASE_URL = "https://blog-service-api.whitewater-2e220d9b.westeurope.azurecontainerapps.io"
 
 # Durable (global, not per-colo like the Cache API) fallback store — holds
-# the latest-10 article list snapshot, a per-slug snapshot of every
+# the full article list snapshot, a per-slug snapshot of every
 # individual article ever fetched, AND (as of the "blog-post counter"
 # backlog item) the blog-post count itself, kept current by
 # ArticleCountSyncFunction's POST /internal/article-count calls rather than
