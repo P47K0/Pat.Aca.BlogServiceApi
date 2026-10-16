@@ -45,5 +45,12 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         /// SetMostViewedArticleUrl for not minting a third secret.
         /// </summary>
         public string SetArticleListUrl { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Another internal endpoint on the same api-proxy Worker as
+        /// SetArticleListUrl (the article-detail and comments syncs), so new
+        /// syncs need no new app setting.
+        /// </summary>
+        public string ApiProxyInternalUrl(string path) => new Uri(new Uri(SetArticleListUrl), path).ToString();
     }
 }
