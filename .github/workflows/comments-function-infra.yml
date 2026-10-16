@@ -15,7 +15,8 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # Repo variable RUNNER (e.g. "self-hosted") picks the runner; unset = GitHub-hosted.
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     environment: dev
     permissions:
       contents: read
