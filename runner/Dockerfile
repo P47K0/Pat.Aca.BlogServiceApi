@@ -13,4 +13,33 @@ RUN apt-get update \
  && curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash \
  && rm -rf /var/lib/apt/lists/*
 
+# The actions the workflows use, downloaded once at image build. Every job runs in a fresh container,
+# so without this each job downloads them again, and the runner gives up on a slow download after
+# 100 seconds (Azure/functions-action is a large tarball). The runner reads
+# ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE/<owner>_<repo>/<sha>.tar.gz before downloading. Keep this list
+# in step with the `uses:` lines in .github/workflows. A tag that has moved since this layer was built
+# is a cache miss and is downloaded as before; `docker build --no-cache` refreshes them.
+ENV ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE=/home/runner/action-archive-cache
+RUN set -eu; \
+    for action in \
+      Azure/functions-action@v1 \
+      actions/checkout@v4 \
+      actions/setup-dotnet@v4 \
+      azure/login@v2 \
+      docker/build-push-action@v6 \
+      docker/login-action@v3 \
+      docker/setup-buildx-action@v3; \
+    do \
+      repo=${action%@*}; tag=${action#*@}; \
+      refs=$(git ls-remote "https://github.com/$repo" "refs/tags/$tag" "refs/tags/$tag^{}"); \
+      sha=$(echo "$refs" | awk '/\^\{\}$/ {print $1; found=1} END {if (!found) exit 1}' \
+            || echo "$refs" | awk 'NR==1 {print $1}'); \
+      dir="$ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE/$(echo "$repo" | tr / _)"; \
+      mkdir -p "$dir"; \
+      curl -fsSL --retry 5 --retry-all-errors -o "$dir/$sha.tar.gz" \
+        "https://codeload.github.com/$repo/tar.gz/$sha"; \
+      echo "$action -> $sha"; \
+    done; \
+    chown -R runner:runner "$ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE"
+
 USER runner
