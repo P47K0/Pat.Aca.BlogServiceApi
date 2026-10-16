@@ -20,8 +20,8 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     {
         public async Task SyncAsync(CancellationToken cancellationToken = default)
         {
-            var articles = await listRepository.GetLatestArticlesAsync(cancellationToken);
-            logger.LogInformation("Recomputed latest {Count} article(s). Publishing to api-proxy.", articles.Count);
+            var articles = await listRepository.GetListedArticlesAsync(cancellationToken);
+            logger.LogInformation("Recomputed {Count} listed article(s). Publishing to api-proxy.", articles.Count);
             await listPublisher.PublishAsync(articles, cancellationToken);
         }
     }

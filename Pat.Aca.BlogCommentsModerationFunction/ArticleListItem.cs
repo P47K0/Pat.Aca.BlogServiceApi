@@ -16,5 +16,8 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         string PublishedAt,
         IReadOnlyList<string> Tags,
         int ViewCount,
-        string? LinkedinVideoEmbedUrl);
+        string? LinkedinVideoEmbedUrl,
+        string? CoverImageUrl,
+        string? SeoDescription,
+        IReadOnlyList<string>? SeoKeywords);
 }

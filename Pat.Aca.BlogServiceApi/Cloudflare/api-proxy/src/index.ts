@@ -8,7 +8,7 @@ export interface Env {
    * `wrangler secret put ARTICLES_API_KEY` — never checked into wrangler.toml. */
   ARTICLES_API_KEY: string;
   /** Durable (not per-colo, unlike the Cache API below) fallback store —
-   * holds both the latest-10 article list snapshot (written either by this
+   * holds both the full article list snapshot (written either by this
    * Worker's own origin fetches, or by ArticleListSyncFunction's Change-Feed
    * push, see "Article list sync" below) and a per-slug snapshot of every
    * individual article ever fetched; see the fallback sections below. Also
@@ -455,13 +455,18 @@ const ARTICLE_LIST_SYNC_PATH = '/internal/article-list';
 /** Narrow, hand-rolled validation (same style as handleMostViewedArticleSync
  * above) rather than a schema library — this Worker has no such dependency
  * elsewhere, and the shape is small enough not to need one.
- * `linkedinVideoEmbedUrl` is the one optional/nullable field, matching the
- * Article interface's own `?: string | null`. `content` is deliberately not
+ * `linkedinVideoEmbedUrl`, `coverImageUrl`, `seoDescription` and
+ * `seoKeywords` are optional/nullable, matching the Article interface's own
+ * `?: ... | null`. `content` is deliberately not
  * part of the wire payload at all — ArticleCountSyncFunction's sibling,
  * ArticleListSyncFunction, never fetches article bodies from Cosmos for
  * this sync (see its own doc comment), so it's filled in as '' here,
  * matching what writeFallbackSnapshotFromArticles already blanks it to
  * anyway. */
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === 'string';
+}
+
 function isValidSyncedArticle(candidate: unknown): candidate is Omit<Article, 'content'> {
   const article = candidate as Record<string, unknown> | null;
   return (
@@ -472,9 +477,12 @@ function isValidSyncedArticle(candidate: unknown): candidate is Omit<Article, 'c
     typeof article.publishedAt === 'string' &&
     Array.isArray(article.tags) && article.tags.every((tag) => typeof tag === 'string') &&
     typeof article.viewCount === 'number' && Number.isInteger(article.viewCount) && article.viewCount >= 0 &&
-    (article.linkedinVideoEmbedUrl === undefined ||
-      article.linkedinVideoEmbedUrl === null ||
-      typeof article.linkedinVideoEmbedUrl === 'string')
+    isOptionalString(article.linkedinVideoEmbedUrl) &&
+    isOptionalString(article.coverImageUrl) &&
+    isOptionalString(article.seoDescription) &&
+    (article.seoKeywords === undefined ||
+      article.seoKeywords === null ||
+      (Array.isArray(article.seoKeywords) && article.seoKeywords.every((keyword) => typeof keyword === 'string')))
   );
 }
 
@@ -585,10 +593,14 @@ async function proxyArticleMarkdownRequest(
 // merely slow cold start (~30s, measured), but the visitor pays every second
 // of it. This durable, non-per-colo fallback (Cloudflare KV — global reads,
 // no colo blind spots) exists specifically to cover that gap for the article
-// LIST route only: whenever a full list fetch from origin succeeds, the 10
-// newest articles' list metadata (no `content` — the list view never needs
+// LIST route only: whenever a full list fetch from origin succeeds, every
+// listed article's metadata (no `content` — the list view never needs
 // it, and there's no reason to multiply origin load fetching bodies nobody
-// may click) get written here. If a live origin fetch for the list is slow
+// may click) gets written here. Until 2026-10-16 this held only the 10
+// newest (key `latest-10`); a fresher 10-item snapshot then replaced a
+// colo's cached full list after every article write, so the homepage tag
+// cloud showed 36 of 152 tags. The full list is ~150-200 KB, far under KV's
+// 25 MB value limit. If a live origin fetch for the list is slow
 // past ORIGIN_TIMEOUT_MS or fails outright, this snapshot is served instead.
 //
 // Originally scoped to the list route only — the article detail route (GET
@@ -601,16 +613,22 @@ async function proxyArticleMarkdownRequest(
 // reader clicked straight from the home page onto a colo that had simply
 // never served that slug before.
 const LIST_PATH = '/articles';
-const FALLBACK_KV_KEY = 'latest-10';
-const FALLBACK_SIZE = 10;
+const FALLBACK_KV_KEY = 'article-list';
+// The pre-2026-10-16 snapshot of only the 10 newest articles. Read by
+// readFallbackSnapshot only while FALLBACK_KV_KEY doesn't exist yet (the
+// first minutes after deploy), never preferred over a colo's own cache.
+// Can go, together with LIST_PARTIAL_HEADER, once FALLBACK_KV_KEY is written.
+const LEGACY_FALLBACK_KV_KEY = 'latest-10';
+// How many of the newest articles count as "the feed's newest items" for
+// the WebSub ping (see notifyWebSubHub).
+const FEED_HEAD_SIZE = 10;
 const ORIGIN_TIMEOUT_MS = 2000;
 
-// Set on every list response served from the FALLBACK_KV_KEY snapshot, which
-// holds only the FALLBACK_SIZE newest articles. Lets a consumer that needs
-// the complete list (ui-worker's sitemap.xml) tell it apart from a real
-// origin response instead of silently publishing 10 URLs. The header travels
-// with the snapshot into the per-colo cache (fresherFallbackResponse), and a
-// later successful revalidate overwrites that entry without it.
+// Set on a list response served from LEGACY_FALLBACK_KV_KEY, which holds only
+// the 10 newest articles. Lets a consumer that needs the complete list
+// (ui-worker's sitemap.xml) tell it apart from a real origin response
+// instead of silently publishing 10 URLs. FALLBACK_KV_KEY holds the full
+// list, so responses served from it don't carry the header.
 const LIST_PARTIAL_HEADER = 'X-List-Partial';
 
 /** True when two articles are identical apart from `viewCount` -- which the
@@ -662,11 +680,12 @@ function parseFallbackSnapshot(raw: string): FallbackSnapshot {
 
 /** True when two list entries match on the fields both FALLBACK_KV_KEY
  * producers supply. ArticleListSyncFunction's push carries only these
- * (no coverImageUrl/seo fields, and no api-proxy-rendered footer), so
- * comparing everything articleContentEquals does would make every push,
- * and the origin fetch after it, look like a change and write KV. None of
- * the other fields are shown on a list card. publishedAt is compared as an
- * instant, since the Function forwards Cosmos's stored string as-is. */
+ * (no content, viewCount changes on every origin fetch, and no
+ * api-proxy-rendered footer), so comparing everything articleContentEquals
+ * does would make every push, and the origin fetch after it, look like a
+ * change and write KV. publishedAt is compared as an instant, since the
+ * Function forwards Cosmos's stored string as-is; optional fields compare
+ * missing and null as equal, since the origin and the Function differ there. */
 function listItemEquals(a: Article, b: Article): boolean {
   return (
     a.slug === b.slug &&
@@ -674,6 +693,9 @@ function listItemEquals(a: Article, b: Article): boolean {
     a.summary === b.summary &&
     Date.parse(a.publishedAt) === Date.parse(b.publishedAt) &&
     (a.linkedinVideoEmbedUrl ?? null) === (b.linkedinVideoEmbedUrl ?? null) &&
+    (a.coverImageUrl ?? null) === (b.coverImageUrl ?? null) &&
+    (a.seoDescription ?? null) === (b.seoDescription ?? null) &&
+    (a.seoKeywords ?? []).join('\n') === (b.seoKeywords ?? []).join('\n') &&
     a.tags.length === b.tags.length &&
     a.tags.every((tag, i) => tag === b.tags[i])
   );
@@ -682,36 +704,39 @@ function listItemEquals(a: Article, b: Article): boolean {
 /** Shared by both writers of FALLBACK_KV_KEY: a successful origin list fetch
  * (writeFallbackSnapshot below) and ArticleListSyncFunction's Change-Feed-
  * driven push (handleArticleListSync, see "Article list sync" below) — same
- * sort/cap/dedupe/writtenAt logic regardless of which one is calling, so the
+ * sort/dedupe/writtenAt logic regardless of which one is calling, so the
  * two producers can never disagree about what a "fresh enough to write"
  * snapshot looks like. */
 async function writeFallbackSnapshotFromArticles(env: Env, articles: Article[]): Promise<void> {
-  const latest = [...articles]
-    .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
-    .slice(0, FALLBACK_SIZE)
+  const sorted = [...articles]
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
     .map((article) => ({ ...article, content: '' }));
 
   const existing = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
-  if (existing) {
-    const existingSnapshot = parseFallbackSnapshot(existing);
-    if (
-      latest.length === existingSnapshot.articles.length &&
-      latest.every((article, i) => listItemEquals(article, existingSnapshot.articles[i]))
-    ) {
-      return;
-    }
+  const existingArticles = existing ? parseFallbackSnapshot(existing).articles : null;
+  if (existingArticles && listsEqual(sorted, existingArticles)) {
+    return;
   }
 
-  const snapshot: FallbackSnapshot = { writtenAt: Date.now(), articles: latest };
+  const snapshot: FallbackSnapshot = { writtenAt: Date.now(), articles: sorted };
   await env.ARTICLES_FALLBACK.put(FALLBACK_KV_KEY, JSON.stringify(snapshot));
-  await notifyWebSubHub();
+  // Only when the feed's newest items changed, not on every edit of an
+  // older article (a tag cleanup would otherwise ping once per PUT).
+  if (!existingArticles || !listsEqual(sorted.slice(0, FEED_HEAD_SIZE), existingArticles.slice(0, FEED_HEAD_SIZE))) {
+    await notifyWebSubHub();
+  }
+}
+
+function listsEqual(a: Article[], b: Article[]): boolean {
+  return a.length === b.length && a.every((article, i) => listItemEquals(article, b[i]));
 }
 
 // ui-worker's /feed.xml declares this hub (rel="hub"), so feed readers that
 // support WebSub (Feedly, Inoreader) get new articles pushed within minutes
 // instead of on their next poll. The hub refetches the feed itself after a
-// ping. Pinged from writeFallbackSnapshotFromArticles because a changed
-// latest-10 snapshot is exactly "the feed's newest items changed", from
+// ping. Pinged from writeFallbackSnapshotFromArticles when the newest
+// FEED_HEAD_SIZE entries of the snapshot change: "the feed's newest items
+// changed", from
 // either producer: ArticleListSyncFunction's push, or an origin fetch that
 // notices a scheduled article going live.
 const WEBSUB_HUB_URL = 'https://pubsubhubbub.appspot.com/';
@@ -741,9 +766,16 @@ async function writeFallbackSnapshot(env: Env, listResponse: Response): Promise<
 
 async function readFallbackSnapshot(env: Env): Promise<Response | null> {
   const stored = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
-  if (!stored) return null;
-  const snapshot = parseFallbackSnapshot(stored);
-  return new Response(JSON.stringify(snapshot.articles), {
+  if (stored) {
+    return new Response(JSON.stringify(parseFallbackSnapshot(stored).articles), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+    });
+  }
+
+  const legacy = await env.ARTICLES_FALLBACK.get(LEGACY_FALLBACK_KV_KEY);
+  if (!legacy) return null;
+  return new Response(JSON.stringify(parseFallbackSnapshot(legacy).articles), {
     status: 200,
     headers: { 'Content-Type': 'application/json', [LIST_PARTIAL_HEADER]: 'true', ...CORS_HEADERS },
   });
@@ -767,7 +799,9 @@ async function readFallbackSnapshot(env: Env): Promise<Response | null> {
  * through to the previous behavior) when there's nothing newer to offer --
  * cheap either way: one extra KV read, not a write. Content-blanked, same as
  * every other use of this snapshot -- accepted already since the list view
- * never needs it (see the "Durable list fallback" section above). */
+ * never needs it (see the "Durable list fallback" section above). Only
+ * FALLBACK_KV_KEY counts here, never the partial legacy key: serving a
+ * 10-item snapshot over a cached full list is the bug this key fixed. */
 async function fresherFallbackResponse(env: Env, cachedAt: number): Promise<Response | null> {
   const stored = await env.ARTICLES_FALLBACK.get(FALLBACK_KV_KEY);
   if (!stored) return null;
@@ -780,7 +814,6 @@ async function fresherFallbackResponse(env: Env, cachedAt: number): Promise<Resp
     headers: {
       'Content-Type': 'application/json',
       [CACHED_AT_HEADER]: String(snapshot.writtenAt),
-      [LIST_PARTIAL_HEADER]: 'true',
       ...CORS_HEADERS,
     },
   });
@@ -788,7 +821,7 @@ async function fresherFallbackResponse(env: Env, cachedAt: number): Promise<Resp
 
 /** Cold-miss handling for the plain (unpaginated) list request only — never
  * called for a paginated `?limit=&after=` request (see proxyArticlesRequest):
- * the durable snapshot only ever holds the latest-10 unpaginated shape, so it
+ * the durable snapshot only ever holds the full unpaginated shape, so it
  * has nothing to offer a specific page/cursor. Infinite-scroll's "load more"
  * requests fall through to the plain cache/fetch path below instead, with no
  * durable-fallback protection — an accepted gap, since that's a progressive

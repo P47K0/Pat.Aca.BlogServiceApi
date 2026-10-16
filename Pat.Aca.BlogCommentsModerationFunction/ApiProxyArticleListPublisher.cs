@@ -36,6 +36,9 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                             tags = article.Tags,
                             viewCount = article.ViewCount,
                             linkedinVideoEmbedUrl = article.LinkedinVideoEmbedUrl,
+                            coverImageUrl = article.CoverImageUrl,
+                            seoDescription = article.SeoDescription,
+                            seoKeywords = article.SeoKeywords,
                         }),
                     })
                 };

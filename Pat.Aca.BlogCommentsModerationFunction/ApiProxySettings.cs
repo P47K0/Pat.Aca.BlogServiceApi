@@ -39,7 +39,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         public string SetMostViewedArticleUrl { get; set; } = string.Empty;
 
         /// <summary>
-        /// api-proxy's internal endpoint for the latest-articles-list sync
+        /// api-proxy's internal endpoint for the article-list sync
         /// (see ArticleListSyncFunction), authenticated with the same
         /// ArticleCountSyncSecret above -- same reasoning as
         /// SetMostViewedArticleUrl for not minting a third secret.

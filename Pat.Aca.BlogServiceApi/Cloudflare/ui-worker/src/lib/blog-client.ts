@@ -13,8 +13,8 @@ export async function getArticles(env: Env): Promise<Article[]> {
 }
 
 /** Like getArticles(), but also reports whether api-proxy served its
- * latest-10 KV snapshot (cold start or a stale colo) instead of the full
- * list. Only callers that must not publish a truncated list (sitemap.xml)
+ * legacy latest-10 KV snapshot instead of the full list. Since api-proxy
+ * stores the full list in KV this only happens before that key exists. Only callers that must not publish a truncated list (sitemap.xml)
  * need this; pages that show the first few articles are fine with either. */
 export async function getArticlesWithCompleteness(env: Env): Promise<{ articles: Article[]; partial: boolean }> {
   const response = await fetchFromProxy(env, '/articles');

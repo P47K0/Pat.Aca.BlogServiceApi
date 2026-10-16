@@ -1,7 +1,7 @@
 namespace Pat.Aca.BlogCommentsModerationFunction
 {
     /// <summary>
-    /// Pushes the freshly-recomputed latest-articles list to api-proxy's
+    /// Pushes the freshly-recomputed full article list to api-proxy's
     /// durable KV fallback store, so a Cosmos write (create, update, an
     /// Unlisted toggle) is reflected there near-real-time instead of
     /// waiting for the next request-driven revalidate/cold-miss cycle to
