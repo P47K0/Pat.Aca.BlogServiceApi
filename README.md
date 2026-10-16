@@ -57,7 +57,7 @@ On Windows with Docker Desktop running:
 powershell -ExecutionPolicy Bypass -File .\runner\start-runner.ps1
 ```
 
-The script builds `runner/Dockerfile` (GitHub's runner image plus Azure CLI and zip) and starts one fresh container per job. On first start it asks for a fine-grained GitHub token for this repository with **Administration: Read and write**. The token is saved encrypted under `%LOCALAPPDATA%\blog-runner\` and never goes into a container. Stop with Ctrl+C. Each container gets the Docker socket for the Deploy workflow's image build.
+The script builds `runner/Dockerfile` and starts one fresh container per job. The image holds what the jobs would otherwise download every time: the actions the workflows use, the .NET SDK, Azure CLI with Bicep and the containerapp extension, and zip. NuGet packages are kept between jobs in the Docker volume `blog-runner-nuget`, and the Deploy workflow builds on Docker Desktop's own layer cache. The first build of the image takes a while (Azure/functions-action alone is about 100 MB); later builds are cached. On first start it asks for a fine-grained GitHub token for this repository with **Administration: Read and write**. The token is saved encrypted under `%LOCALAPPDATA%\blog-runner\` and never goes into a container. Stop with Ctrl+C. Each container gets the Docker socket for the Deploy workflow's image build.
 
 ## API
 

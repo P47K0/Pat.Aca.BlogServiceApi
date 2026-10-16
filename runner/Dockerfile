@@ -4,7 +4,7 @@
 #
 # On top of GitHub's runner image (which already has the docker CLI and buildx): what the workflows
 # expect from ubuntu-latest. Azure CLI for azure/login and the az deployment / az containerapp steps,
-# zip/unzip for Azure/functions-action. .NET comes from actions/setup-dotnet at job time.
+# zip/unzip for Azure/functions-action, and the .NET SDK (see below).
 FROM ghcr.io/actions/actions-runner:latest
 
 USER root
@@ -42,4 +42,30 @@ RUN set -eu; \
     done; \
     chown -R runner:runner "$ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE"
 
+# The .NET SDK in /usr/share/dotnet, where it is on ubuntu-latest and where actions/setup-dotnet
+# installs. That folder belongs to root in this image, so setup-dotnet failed as the runner user
+# ("mkdir: cannot create directory '/usr/share/dotnet': Permission denied"). With the SDK here,
+# setup-dotnet finds the version already installed; owned by runner, so it can still add a newer
+# patch. Below the action cache, so changing this layer doesn't download the actions again.
+# Keep the channel in step with dotnet-version in .github/workflows.
+ENV DOTNET_ROOT=/usr/share/dotnet \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1
+ENV PATH=$DOTNET_ROOT:$PATH
+RUN curl -fsSL --retry 5 --retry-all-errors -o /tmp/dotnet-install.sh https://dot.net/v1/dotnet-install.sh \
+ && bash /tmp/dotnet-install.sh --channel 10.0 --install-dir "$DOTNET_ROOT" \
+ && rm /tmp/dotnet-install.sh \
+ && chown -R runner:runner "$DOTNET_ROOT" \
+ && dotnet --version
+
 USER runner
+
+# What az would otherwise download in every job: the Bicep CLI (az deployment group create with a
+# .bicep file, in the Cosmos DB and Comments Function Infra workflows) and the containerapp extension
+# (the Deploy workflow). Both go into ~/.azure, which azure/login keeps.
+RUN az bicep install && az extension add --name containerapp --only-show-errors
+
+# start-runner.ps1 mounts a named volume here, so NuGet packages survive between jobs. Created in the
+# image so the new volume belongs to runner rather than root. Not baked into the image: the Functions
+# SDK picks some packages from the source at build time, and every package bump would need a rebuild.
+RUN mkdir -p /home/runner/.nuget/packages
