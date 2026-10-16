@@ -91,6 +91,7 @@ builder.Services.AddSingleton<IArticleContextProvider>(sp =>
 builder.Services.AddSingleton<IArticleCountRepository>(sp => new CosmosArticleCountRepository(articlesContainer));
 builder.Services.AddSingleton<IMostViewedArticleRepository>(sp => new CosmosMostViewedArticleRepository(articlesContainer));
 builder.Services.AddSingleton<IArticleListRepository>(sp => new CosmosArticleListRepository(articlesContainer));
+builder.Services.AddSingleton<IPublishedCommentsRepository>(sp => new CosmosPublishedCommentsRepository(commentsContainer));
 
 builder.Services.AddSingleton(sp => new EmailClient(acsSettings.ConnectionString));
 
@@ -100,11 +101,15 @@ builder.Services.AddSingleton<IModerationQuotaStore, CosmosModerationQuotaStore>
 builder.Services.AddHttpClient<IArticleCountPublisher, ApiProxyArticleCountPublisher>();
 builder.Services.AddHttpClient<IMostViewedArticlePublisher, ApiProxyMostViewedArticlePublisher>();
 builder.Services.AddHttpClient<IArticleListPublisher, ApiProxyArticleListPublisher>();
+builder.Services.AddHttpClient<IArticleDetailPublisher, ApiProxyArticleDetailPublisher>();
+builder.Services.AddHttpClient<IPublishedCommentsPublisher, ApiProxyPublishedCommentsPublisher>();
 builder.Services.AddSingleton<CommentStatusWriter>();
 builder.Services.AddSingleton<CommentModerationProcessor>();
 builder.Services.AddSingleton<StuckCommentSweeper>();
 builder.Services.AddSingleton<ArticleCountSyncProcessor>();
 builder.Services.AddSingleton<MostViewedSyncProcessor>();
 builder.Services.AddSingleton<ArticleListSyncProcessor>();
+builder.Services.AddSingleton<ArticleDetailSyncProcessor>();
+builder.Services.AddSingleton<CommentsSyncProcessor>();
 
 builder.Build().Run();
