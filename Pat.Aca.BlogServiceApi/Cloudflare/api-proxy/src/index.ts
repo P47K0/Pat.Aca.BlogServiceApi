@@ -132,6 +132,10 @@ interface Article {
   coverImageUrl?: string | null;
   seoDescription?: string | null;
   seoKeywords?: string[] | null;
+  seriesName?: string | null;
+  seriesOrder?: number | null;
+  relatedSlugs?: string[] | null;
+  updatedAt?: string | null;
   /** Hides the article from lists; also means it gets no ARTICLE_FOOTER
    * (e.g. the `about` CV document the AI assistant reads). */
   unlisted?: boolean;
@@ -455,8 +459,9 @@ const ARTICLE_LIST_SYNC_PATH = '/internal/article-list';
 /** Narrow, hand-rolled validation (same style as handleMostViewedArticleSync
  * above) rather than a schema library — this Worker has no such dependency
  * elsewhere, and the shape is small enough not to need one.
- * `linkedinVideoEmbedUrl`, `coverImageUrl`, `seoDescription` and
- * `seoKeywords` are optional/nullable, matching the Article interface's own
+ * `linkedinVideoEmbedUrl`, `coverImageUrl`, `seoDescription`,
+ * `seoKeywords`, `seriesName`, `seriesOrder`, `relatedSlugs` and
+ * `updatedAt` are optional/nullable, matching the Article interface's own
  * `?: ... | null`. `content` is deliberately not
  * part of the wire payload at all — ArticleCountSyncFunction's sibling,
  * ArticleListSyncFunction, never fetches article bodies from Cosmos for
@@ -465,6 +470,10 @@ const ARTICLE_LIST_SYNC_PATH = '/internal/article-list';
  * anyway. */
 function isOptionalString(value: unknown): boolean {
   return value === undefined || value === null || typeof value === 'string';
+}
+
+function isOptionalStringArray(value: unknown): boolean {
+  return value === undefined || value === null || (Array.isArray(value) && value.every((item) => typeof item === 'string'));
 }
 
 function isValidSyncedArticle(candidate: unknown): candidate is Omit<Article, 'content'> {
@@ -480,9 +489,11 @@ function isValidSyncedArticle(candidate: unknown): candidate is Omit<Article, 'c
     isOptionalString(article.linkedinVideoEmbedUrl) &&
     isOptionalString(article.coverImageUrl) &&
     isOptionalString(article.seoDescription) &&
-    (article.seoKeywords === undefined ||
-      article.seoKeywords === null ||
-      (Array.isArray(article.seoKeywords) && article.seoKeywords.every((keyword) => typeof keyword === 'string')))
+    isOptionalStringArray(article.seoKeywords) &&
+    isOptionalString(article.seriesName) &&
+    (article.seriesOrder === undefined || article.seriesOrder === null || Number.isInteger(article.seriesOrder)) &&
+    isOptionalStringArray(article.relatedSlugs) &&
+    isOptionalString(article.updatedAt)
   );
 }
 
@@ -685,7 +696,10 @@ function parseFallbackSnapshot(raw: string): FallbackSnapshot {
  * does would make every push, and the origin fetch after it, look like a
  * change and write KV. publishedAt is compared as an instant, since the
  * Function forwards Cosmos's stored string as-is; optional fields compare
- * missing and null as equal, since the origin and the Function differ there. */
+ * missing and null as equal, since the origin and the Function differ there.
+ * The series/related fields and updatedAt count too: ui-worker reads them
+ * off list items (series nav, related links, sitemap lastmod), so a pushed
+ * list without them must not be treated as equal to one with them. */
 function listItemEquals(a: Article, b: Article): boolean {
   return (
     a.slug === b.slug &&
@@ -696,9 +710,17 @@ function listItemEquals(a: Article, b: Article): boolean {
     (a.coverImageUrl ?? null) === (b.coverImageUrl ?? null) &&
     (a.seoDescription ?? null) === (b.seoDescription ?? null) &&
     (a.seoKeywords ?? []).join('\n') === (b.seoKeywords ?? []).join('\n') &&
+    (a.seriesName ?? null) === (b.seriesName ?? null) &&
+    (a.seriesOrder ?? null) === (b.seriesOrder ?? null) &&
+    (a.relatedSlugs ?? []).join('\n') === (b.relatedSlugs ?? []).join('\n') &&
+    instantOrNull(a.updatedAt) === instantOrNull(b.updatedAt) &&
     a.tags.length === b.tags.length &&
     a.tags.every((tag, i) => tag === b.tags[i])
   );
+}
+
+function instantOrNull(value: string | null | undefined): number | null {
+  return value ? Date.parse(value) : null;
 }
 
 /** Shared by both writers of FALLBACK_KV_KEY: a successful origin list fetch
