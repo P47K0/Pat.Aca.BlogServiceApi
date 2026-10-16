@@ -25,7 +25,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The self-hosted runner image already has the SDK (runner/Dockerfile); setup-dotnet would only
+      # spend ~10 s checking online that it's installed.
       - name: Setup .NET
+        if: vars.RUNNER != 'self-hosted'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
