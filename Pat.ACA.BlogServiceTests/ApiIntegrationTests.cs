@@ -167,14 +167,16 @@ namespace Pat.ACA.BlogServiceTests
         }
 
         [Fact]
-        public async Task GET_articles_slug_increments_view_count_on_each_request()
+        public async Task GET_articles_slug_does_not_count_a_view()
         {
+            // Views are counted at the edge and flushed by the Function
+            // (ViewCountFlushFunction), not by origin reads.
             var first = await (await _client.GetAsync("/articles/second-article")).Content.ReadFromJsonAsync<Article>();
             var second = await (await _client.GetAsync("/articles/second-article")).Content.ReadFromJsonAsync<Article>();
 
             Assert.NotNull(first);
             Assert.NotNull(second);
-            Assert.Equal(first!.ViewCount + 1, second!.ViewCount);
+            Assert.Equal(first!.ViewCount, second!.ViewCount);
         }
 
         [Fact]
@@ -240,8 +242,7 @@ namespace Pat.ACA.BlogServiceTests
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
 
             // Never the seeded future-dated article, regardless of its
-            // (always-zero, since IncrementViewCountAsync can't touch it)
-            // ViewCount -- see IArticleRepository.GetMostViewedArticleAsync's
+            // (always-zero) ViewCount -- see IArticleRepository.GetMostViewedArticleAsync's
             // doc comment for why this must never point at something not
             // publicly visible.
             Assert.NotEqual("future-article", body.GetProperty("slug").GetString());

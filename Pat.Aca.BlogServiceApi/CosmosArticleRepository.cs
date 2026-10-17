@@ -35,8 +35,8 @@ namespace Pat.Aca.BlogServiceApi
             // user's own custom field, distinct from Cosmos's mandatory system "id"
             // (which every document also has, separately, auto-generated). A blanket
             // CamelCase policy would make Id try to bind from that system "id" GUID
-            // instead, breaking every read. See IncrementViewCountAsync for how the
-            // view-count write targets the real system id without touching this.
+            // instead, breaking every read. See FindCosmosIdBySlugAsync for how the
+            // write path targets the real system id without touching this.
             var clientOptions = new CosmosClientOptions();
 
             if (!string.IsNullOrEmpty(settings.PrimaryKey))
@@ -302,60 +302,11 @@ namespace Pat.Aca.BlogServiceApi
             return new ArticlesPage(page, hasMore, hasMore ? page[^1].Slug : null);
         }
 
-        public async Task<Article?> IncrementViewCountAsync(string slug)
-        {
-            // Cosmos's own system "id" — mandatory on every document, always a
-            // lowercase string — is the one property name Cosmos itself
-            // guarantees, unlike Article.Id (confirmed stored as "Id": the
-            // user's own custom field, a completely different value) or any of
-            // Article's other properties (their real casing was never verified
-            // by a case-sensitive query, only ever read via case-insensitive
-            // POCO binding). Look it up narrowly instead of guessing.
-            // Same future-publishedAt exclusion as GetArticleBySlugAsync.
-            var idQuery = new QueryDefinition(
-                "SELECT VALUE c.id FROM c WHERE c.slug = @slug AND c.publishedAt <= @now")
-                .WithParameter("@slug", slug)
-                .WithParameter("@now", DateTime.UtcNow);
-
-            string? cosmosId = null;
-            using (FeedIterator<string> idIterator = _container.GetItemQueryIterator<string>(idQuery))
-            {
-                while (idIterator.HasMoreResults && cosmosId is null)
-                {
-                    FeedResponse<string> idResponse = await idIterator.ReadNextAsync();
-                    cosmosId = idResponse.Resource.FirstOrDefault();
-                }
-            }
-
-            if (cosmosId is null)
-            {
-                return null;
-            }
-
-            // A targeted Patch, not a read-modify-write/Upsert of the whole
-            // article: avoids needing to know or match the real casing of any
-            // property but "/viewCount", which is new and freely named here.
-            // Increment creates the field (starting from the given value) if
-            // it doesn't exist yet — confirmed via Cosmos's Patch API docs —
-            // so this is safe on an article that's never been viewed before.
-            // Also atomic, unlike a read-modify-write: concurrent views can't
-            // lose an update. Deserializes the patched document into
-            // ArticleDocument, not Article directly — see the comment in
-            // GetArticleBySlugAsync above; a write-path article has no "Id"
-            // field, which breaks Article's constructor-based deserialization.
-            ItemResponse<ArticleDocument> response = await _container.PatchItemAsync<ArticleDocument>(
-                cosmosId,
-                new PartitionKey(slug),
-                new[] { PatchOperation.Increment("/viewCount", 1) });
-
-            return ToArticle(response.Resource);
-        }
-
         /// <summary>
         /// Looks up an article's real Cosmos system id by slug, with no
-        /// publishedAt filter — unlike GetArticleBySlugAsync/
-        /// IncrementViewCountAsync above, which deliberately hide future-dated
-        /// articles from readers/view-counting, the write path needs to find an
+        /// publishedAt filter — unlike GetArticleBySlugAsync above, which
+        /// deliberately hides future-dated articles from readers, the write
+        /// path needs to find an
         /// article regardless of publish state: an author must be able to see
         /// and edit their own scheduled drafts. Returns null if no document has
         /// this slug.
@@ -428,8 +379,7 @@ namespace Pat.Aca.BlogServiceApi
             }
 
             // A targeted Patch, not a full ReplaceItemAsync of the whole
-            // document — same reasoning as IncrementViewCountAsync above: this
-            // never has to read or preserve viewCount (or guess any other
+            // document: this never has to read or preserve viewCount (or guess any other
             // property's real casing on existing hand-authored documents),
             // since it only ever touches the specific paths named here.
             //
