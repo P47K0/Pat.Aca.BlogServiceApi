@@ -1,46 +1,66 @@
-/** Records one Analytics Engine data point per article page view, so the
- * views can be counted per article and per referring site (GET
- * /referrers.json, tools/article-referrers).
+/** Records one Analytics Engine data point per article view, so the views
+ * can be counted per article and per referring site (GET /referrers.json,
+ * tools/article-referrers).
+ *
+ * A view is counted from the page's own script (VIEW_BEACON_CLIENT_SCRIPT,
+ * POST /api/view) once the page is shown, not when this Worker serves the
+ * HTML: anything that downloads the page with a browser-like User-Agent used
+ * to count, and its Referer header became a "referring site". Visitors with
+ * JavaScript off are no longer counted; there are too few to matter.
  *
  * Layout: index1 = slug, blob1 = slug, blob2 = source. The source is the
- * Referer's host without "www." ("google.com", "linkedin.com",
+ * referring page's host without "www." ("google.com", "linkedin.com",
  * "com.linkedin.android" for an android-app:// referrer), else the
  * utm_source query parameter as "utm:<value>", else "direct". Only the host
- * is kept, never the full referring URL or anything about the visitor.
- *
- * Crawlers (same CRAWLER_PATTERN as the feed count), requests without a
- * User-Agent, HEAD requests and browser prefetches are not recorded. */
+ * is sent and kept, never the full referring URL or anything about the
+ * visitor. */
 
 import { CRAWLER_PATTERN } from './feed-analytics';
 
-const MAX_SOURCE_LENGTH = 96;
+const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,159}$/;
+const HOST_PATTERN = /^[a-z0-9][a-z0-9.-]{0,95}$/;
+const UTM_PATTERN = /^[a-z0-9._-]{1,64}$/;
 
-export function referrerSource(request: Request): string {
-  const referer = request.headers.get('Referer');
-  if (referer) {
-    try {
-      const url = new URL(referer);
-      const host = (url.hostname || url.host || url.protocol).replace(/^www\./, '').toLowerCase();
-      if (host) return host.slice(0, MAX_SOURCE_LENGTH);
-    } catch {
-      // Not a URL; fall through to utm_source / direct.
-    }
-  }
-  const utmSource = new URL(request.url).searchParams.get('utm_source')?.trim().toLowerCase();
-  return utmSource ? `utm:${utmSource}`.slice(0, MAX_SOURCE_LENGTH) : 'direct';
+export interface ArticleView {
+  slug: string;
+  source: string;
 }
 
-function isCountedView(request: Request): boolean {
-  if (request.method !== 'GET') return false;
+/** The referring site as stored in blob2, from the beacon's `ref` (a host)
+ * and `utm` (utm_source) values, both already validated. */
+export function sourceOf(referrerHost: string, utmSource: string): string {
+  if (referrerHost) return referrerHost.replace(/^www\./, '');
+  return utmSource ? `utm:${utmSource}` : 'direct';
+}
+
+/** The view a beacon reports, or null when it doesn't come from a page of
+ * this site (Origin, else Sec-Fetch-Site), comes from a crawler or a client
+ * without a User-Agent, or carries values that aren't plain. */
+export function parseViewBeacon(request: Request, form: FormData): ArticleView | null {
   const userAgent = request.headers.get('User-Agent') ?? '';
-  if (userAgent === '' || CRAWLER_PATTERN.test(userAgent)) return false;
-  const purpose = `${request.headers.get('Sec-Purpose') ?? ''} ${request.headers.get('Purpose') ?? ''}`;
-  return !/prefetch|prerender/i.test(purpose);
+  if (userAgent === '' || CRAWLER_PATTERN.test(userAgent)) return null;
+
+  const origin = request.headers.get('Origin');
+  const sameOrigin = origin
+    ? origin === new URL(request.url).origin
+    : request.headers.get('Sec-Fetch-Site') === 'same-origin';
+  if (!sameOrigin) return null;
+
+  const value = (name: string) => {
+    const field = form.get(name);
+    return typeof field === 'string' ? field.trim().toLowerCase() : '';
+  };
+  const slug = value('slug');
+  const ref = value('ref');
+  const utm = value('utm');
+  if (!SLUG_PATTERN.test(slug)) return null;
+  if (ref && !HOST_PATTERN.test(ref)) return null;
+  if (utm && !UTM_PATTERN.test(utm)) return null;
+  return { slug, source: sourceOf(ref, utm) };
 }
 
-export function recordArticleView(dataset: AnalyticsEngineDataset, request: Request, slug: string): void {
-  if (!isCountedView(request)) return;
-  dataset.writeDataPoint({ indexes: [slug], blobs: [slug, referrerSource(request)] });
+export function recordArticleView(dataset: AnalyticsEngineDataset, view: ArticleView): void {
+  dataset.writeDataPoint({ indexes: [view.slug], blobs: [view.slug, view.source] });
 }
 
 export interface ArticleReferrers {

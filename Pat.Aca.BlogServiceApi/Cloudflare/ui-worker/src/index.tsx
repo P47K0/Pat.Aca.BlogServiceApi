@@ -8,7 +8,7 @@ import { searchAssistant, resolveSearchResults } from './lib/search-client';
 import { verifyTurnstile } from './lib/turnstile';
 import { escapeXml } from './lib/xml';
 import { estimateSubscribers, recordFeedFetch, type DailyEstimate } from './lib/feed-analytics';
-import { articleReferrers, MAX_REFERRER_DAYS, recordArticleView, type ArticleReferrers } from './lib/referrer-analytics';
+import { articleReferrers, MAX_REFERRER_DAYS, parseViewBeacon, recordArticleView, type ArticleReferrers } from './lib/referrer-analytics';
 import { Layout, SITE_AUTHOR } from './components/Layout';
 import { ArticlesFragment } from './components/ArticlesFragment';
 import { HomePage, LOAD_MORE_PAGE_SIZE } from './pages/Home';
@@ -181,13 +181,6 @@ app.get('/articles/:slug', async (c) => {
   if (!article) {
     return c.notFound();
   }
-  try {
-    recordArticleView(c.env.REFERRER_ANALYTICS, c.req.raw, article.slug);
-  } catch (err) {
-    // A failed analytics write never breaks the page.
-    console.error('referrer analytics', err);
-  }
-
   // Series nav / related articles need other articles' titles, which the
   // single-article fetch above doesn't carry (relatedSlugs is just slugs).
   // Only fetched when this article actually references either, so the
@@ -414,6 +407,28 @@ app.get('/feed-subscribers.json', async (c) => {
   });
   c.executionCtx.waitUntil(caches.default.put(cacheKey, response.clone()));
   return response;
+});
+
+// One article view, sent by the article page's own script once the page is
+// shown (lib/view-beacon-client.ts), instead of counting every download of
+// the HTML. Always 204, also for a beacon that isn't counted, so a script
+// probing it learns nothing. Only listed articles count: the slug is checked
+// against the article list, which api-proxy serves from KV without waking
+// the API. Rate limited per IP, so one client can't inflate the counts.
+app.post('/api/view', async (c) => {
+  try {
+    const view = parseViewBeacon(c.req.raw, await c.req.raw.formData());
+    if (!view) return c.body(null, 204);
+    const { success } = await c.env.VIEW_RATE_LIMITER.limit({ key: c.req.header('CF-Connecting-IP') ?? '' });
+    if (!success) return c.body(null, 204);
+    const articles = await getArticles(c.env);
+    if (articles.some((article) => article.slug === view.slug)) {
+      recordArticleView(c.env.REFERRER_ANALYTICS, view);
+    }
+  } catch (err) {
+    console.error('view beacon', err);
+  }
+  return c.body(null, 204);
 });
 
 // Article views per referring site, last 30 days by default (?days=1..90),

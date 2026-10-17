@@ -5,6 +5,7 @@ import { TagList } from '../components/TagList';
 import { CommentSection } from '../components/CommentSection';
 import { formatDate } from '../lib/format-date';
 import { IMAGE_LIGHTBOX_CLIENT_SCRIPT } from '../lib/image-lightbox-client';
+import { VIEW_BEACON_CLIENT_SCRIPT } from '../lib/view-beacon-client';
 
 export const ArticleDetailPage: FC<{
   article: Article;
@@ -171,6 +172,7 @@ export const ArticleDetailPage: FC<{
         View as Markdown
       </a>
     </div>
+    <script data-slug={article.slug} dangerouslySetInnerHTML={{ __html: VIEW_BEACON_CLIENT_SCRIPT }} />
   </>
   );
 };

@@ -68,3 +68,11 @@ dataset = "rss_feed_fetches"
 [[analytics_engine_datasets]]
 binding = "REFERRER_ANALYTICS"
 dataset = "article_referrers"
+
+# Per-IP limit for POST /api/view (the article view beacon), so one client
+# can't inflate the view and referrer counts. namespace_id is any number
+# unique within the Cloudflare account.
+[[ratelimits]]
+name = "VIEW_RATE_LIMITER"
+namespace_id = "1101"
+simple = { limit = 30, period = 60 }
