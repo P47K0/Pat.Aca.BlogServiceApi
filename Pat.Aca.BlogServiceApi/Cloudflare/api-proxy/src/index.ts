@@ -604,14 +604,12 @@ const MAX_ARTICLES_PAGE_SIZE = 50;
 // timer push rewrites it within 5 minutes.
 const LIST_UNAVAILABLE_RETRY_AFTER_SECONDS = 300;
 
-/** True when two articles are identical apart from `viewCount` -- which the
- * origin bumps on every fetch by design (see this file's top-of-file SWR
- * comment on the accepted undercount), so it alone would make every
- * revalidate look like a content change even when nothing a reader would
- * notice actually changed. Lets the write functions below skip a KV write --
- * eventually-consistent, per-write-limited, and offering no freshness benefit
- * when the stored bytes wouldn't change anyway -- for the common case where a
- * background revalidate just re-confirms already-cached content. */
+/** True when two articles are identical apart from `viewCount`. Lets
+ * writeDetailFallbackSnapshot below skip a KV write -- eventually-consistent,
+ * per-write-limited, and offering no freshness benefit when the stored bytes
+ * wouldn't change anyway -- for the common case where a background
+ * revalidate just re-confirms already-cached content. That caller compares
+ * `viewCount` itself. */
 function articleContentEquals(a: Article, b: Article): boolean {
   return (
     a.id === b.id &&
@@ -805,16 +803,20 @@ async function proxyListRequest(env: Env, ctx: ExecutionContext, search: string,
 // since (unlike the list) there's no natural "latest N" that covers the
 // actual failure mode — written on every successful origin fetch (cold-miss
 // or background revalidate) whose content actually differs from what's
-// already stored (see articleContentEquals — `viewCount` alone, which the
-// origin bumps on every fetch, doesn't count as a change); and the full
+// already stored (articleContentEquals plus `viewCount`); and the full
 // rendered `content` is kept, not blanked, since that's the entire point of
-// this route. Reuses the same ARTICLES_FALLBACK namespace as the list
+// this route. `viewCount` used to be left out of the comparison, back when
+// the origin bumped it on every fetch, so the snapshot kept the count from
+// the last content edit (a cold colo showed 37 views while Cosmos had 70).
+// Since the hourly ViewCountFlushFunction became its only writer it changes
+// at most once an hour per article that had views. Reuses the same ARTICLES_FALLBACK namespace as the list
 // snapshot rather than provisioning a second KV namespace for what's the
 // same fallback purpose — a `article:{slug}` key prefix keeps the two from
 // ever colliding. Storage stays tiny at this blog's scale (one entry per
 // article ever fetched, a few KB each); write volume is bounded by real
-// content changes, not by traffic — a background revalidate that re-fetches
-// unchanged content (the common case) costs one extra KV read, not a write.
+// content and view-count changes, not by traffic — a background revalidate
+// that re-fetches an unchanged article (the common case) costs one extra KV
+// read, not a write.
 function detailFallbackKey(slug: string): string {
   return `article:${slug}`;
 }
@@ -830,7 +832,8 @@ async function writeDetailFallbackSnapshot(env: Env, slug: string, articleRespon
   const article = (await articleResponse.json()) as Article;
 
   const existing = await env.ARTICLES_FALLBACK.get(detailFallbackKey(slug));
-  if (existing && articleContentEquals(JSON.parse(existing) as Article, article)) {
+  const stored = existing ? (JSON.parse(existing) as Article) : null;
+  if (stored && articleContentEquals(stored, article) && stored.viewCount === article.viewCount) {
     return;
   }
 
