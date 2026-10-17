@@ -33,9 +33,11 @@ export interface Env {
    * lib/feed-analytics.ts). Binding in wrangler.toml. */
   FEED_ANALYTICS: AnalyticsEngineDataset;
   /** Analytics Engine dataset `article_referrers`: one data point per
-   * article page view, for views per referring site (see
+   * article view (counted by POST /api/view), for views per referring site (see
    * lib/referrer-analytics.ts). Binding in wrangler.toml. */
   REFERRER_ANALYTICS: AnalyticsEngineDataset;
+  /** Rate limit for POST /api/view, per IP (wrangler.toml [[ratelimits]]). */
+  VIEW_RATE_LIMITER: RateLimit;
   /** Cloudflare account id and an "Account Analytics: Read" API token, for
    * reading rss_feed_fetches and article_referrers back via the Analytics
    * Engine SQL API (GET /feed-subscribers.json, GET /referrers.json). Both
