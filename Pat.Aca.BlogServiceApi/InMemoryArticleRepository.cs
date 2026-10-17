@@ -62,6 +62,8 @@ namespace Pat.Aca.BlogServiceApi
                 : new MostViewedArticle(top.Slug, top.Title, top.Summary, top.ViewCount, top.CoverImageUrl));
         }
 
+        // Not on IArticleRepository any more (reads don't count views; the
+        // Function adds them in Cosmos), kept so tests can give an article views.
         public Task<Article?> IncrementViewCountAsync(string slug)
         {
             var index = SeedArticles.FindIndex(a => a.Slug == slug && a.PublishedAt <= DateTime.UtcNow);

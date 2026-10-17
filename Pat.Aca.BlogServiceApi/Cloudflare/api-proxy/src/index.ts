@@ -77,18 +77,16 @@ const ARTICLE_COMMENTS_PATH = /^\/articles\/[^/]+\/comments$/;
 // copy exists. Only a true first-ever request for a route (or a cache entry
 // evicted by Cloudflare) still pays a synchronous cold start.
 //
-// Accepted trade-off: the background refresh still hits the real origin and
-// increments its viewCount for real, but only once per interval regardless
-// of how many reads happen in between — an accepted undercount, not a bug.
-// No purge-on-write is needed either: staleness after an edit the user makes
+// Origin reads don't count views (the ui-worker's page beacon does, and the
+// Function's ViewCountFlushFunction adds them to Cosmos hourly), so serving
+// from cache loses no views. No purge-on-write is needed either: staleness after an edit the user makes
 // themselves is already bounded to REVALIDATE_INTERVAL_MS by the background
 // refresh itself.
 //
 // A cold start on this container was measured at ~30s (2026-09-04), well
 // under this interval — so the interval isn't hiding an unknown worst case,
 // it's a deliberate choice of how often to pay a background (never
-// visitor-facing) cold start in exchange for fresher content and a tighter
-// viewCount undercount bound after an edit.
+// visitor-facing) cold start in exchange for fresher content after an edit.
 const REVALIDATE_INTERVAL_MS = 1 * 60 * 1000;
 
 // Custom header recording when a cached response was fetched from origin, so

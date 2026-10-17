@@ -614,6 +614,40 @@ resource cosmosCommentsFunctionArticlesLeasesRoleAssignment 'Microsoft.DocumentD
   }
 }
 
+// Lets the Function's ViewCountFlushFunction add the edge-counted views to
+// an article's viewCount (a Patch, which Cosmos RBAC treats as "replace").
+// Replace only, scoped to the Articles container: no create or delete, and
+// nothing on any other container. Cosmos RBAC can't narrow it to one field,
+// so the identity could in principle patch other article fields too.
+resource cosmosArticlesViewCountWriterRoleDefinition 'Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions@2024-05-15' = {
+  parent: account
+  name: guid(account.id, 'Articles view-count writer role')
+  properties: {
+    roleName: 'Articles View-Count Writer'
+    type: 'CustomRole'
+    assignableScopes: [
+      '${account.id}/dbs/${database.name}/colls/${container.name}'
+    ]
+    permissions: [
+      {
+        dataActions: [
+          'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/replace'
+        ]
+      }
+    ]
+  }
+}
+
+resource cosmosCommentsFunctionArticlesViewCountWriterRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(blogCommentsFunctionPrincipalId)) {
+  parent: account
+  name: guid(account.id, blogCommentsFunctionPrincipalId, 'Articles view-count writer role')
+  properties: {
+    roleDefinitionId: cosmosArticlesViewCountWriterRoleDefinition.id
+    principalId: blogCommentsFunctionPrincipalId
+    scope: '${account.id}/dbs/${database.name}/colls/${container.name}'
+  }
+}
+
 output cosmosAccountName string = account.name
 output cosmosDatabaseName string = database.name
 output cosmosContainerName string = container.name

@@ -53,20 +53,12 @@ namespace Pat.Aca.BlogServiceApi
         /// can actually click — it must never point at something not
         /// publicly visible. Null if there are no eligible articles at all.
         /// Kept current in Cloudflare KV via a periodic (twice-daily)
-        /// TimerTrigger Function rather than reacting to every view, since
-        /// ViewCount changes on every article read, far too often to
-        /// recompute this on each change the way GetArticleCountAsync does.
+        /// TimerTrigger Function rather than reacting to every view change
+        /// (the Function adds views to ViewCount hourly), the way
+        /// GetArticleCountAsync is recomputed on each change.
         /// </summary>
         Task<MostViewedArticle?> GetMostViewedArticleAsync();
 
-        /// <summary>
-        /// Atomically-intended increment of an article's view count. Returns the
-        /// updated article, or null if <paramref name="slug"/> doesn't match a
-        /// published article (mirrors <see cref="GetArticleBySlugAsync"/>'s
-        /// future-publishedAt exclusion — an unpublished/scheduled article's
-        /// views aren't counted).
-        /// </summary>
-        Task<Article?> IncrementViewCountAsync(string slug);
 
         /// <summary>
         /// Creates a new article. Returns null if an article with this slug

@@ -357,7 +357,7 @@ app.MapGet("/articles/most-viewed", async Task<IResult> (IArticleRepository arti
     .RequireRateLimiting(ArticlesRateLimiterPolicy)
     .AddEndpointFilter(RequireApiKey);
 
-app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleRepository articleRepository, ILogger<Program> logger) =>
+app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleRepository articleRepository) =>
 {
     if (string.IsNullOrEmpty(slug))
     {
@@ -370,19 +370,11 @@ app.MapGet("/articles/{slug}", async Task<IResult> (string slug, IArticleReposit
         return Results.Problem("Article not found", statusCode: StatusCodes.Status404NotFound);
     }
 
-    // View counting is best-effort: a failure here shouldn't turn an
-    // otherwise-successful article fetch into an error for the reader.
-    Article? withView = null;
-    try
-    {
-        withView = await articleRepository.IncrementViewCountAsync(slug);
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning(ex, "Failed to increment view count for article {Slug}.", slug);
-    }
-
-    return Results.Json(withView ?? article);
+    // No view counting here: reads mostly never reach this API (api-proxy
+    // serves them from cache/KV), so views are counted at the edge by the
+    // ui-worker's page beacon and added to viewCount hourly by the Function's
+    // ViewCountFlushFunction, straight in Cosmos.
+    return Results.Json(article);
 })
     .RequireRateLimiting(ArticlesRateLimiterPolicy)
     .AddEndpointFilter(RequireApiKey);

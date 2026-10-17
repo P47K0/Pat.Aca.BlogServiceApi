@@ -57,6 +57,13 @@ param cloudflareAccountId string
 param cloudflareApiToken string
 
 @secure()
+@description('Cloudflare API token with Account Analytics Read, for ViewCountFlushFunction\'s Analytics Engine queries. Blank leaves the flush off (it logs a warning).')
+param cloudflareAnalyticsApiToken string = ''
+
+@description('Cloudflare account that holds the ui-worker\'s article_referrers Analytics Engine dataset')
+param cloudflareAnalyticsAccountId string = cloudflareAccountId
+
+@secure()
 @description('Azure Communication Services connection string, reusing the user\'s existing resource from their other project, YoutubeChannelGuard')
 param acsConnectionString string
 
@@ -257,6 +264,14 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'CloudflareWorkersAi__ApiToken'
           value: cloudflareApiToken
+        }
+        {
+          name: 'CloudflareAnalytics__AccountId'
+          value: cloudflareAnalyticsAccountId
+        }
+        {
+          name: 'CloudflareAnalytics__ApiToken'
+          value: cloudflareAnalyticsApiToken
         }
         {
           name: 'AcsEmail__ConnectionString'

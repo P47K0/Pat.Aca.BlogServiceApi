@@ -31,11 +31,13 @@ var moderationSettings = builder.Configuration.GetSection("Moderation").Get<Mode
 var cloudflareSettings = builder.Configuration.GetSection("CloudflareWorkersAi").Get<CloudflareWorkersAiSettings>() ?? new CloudflareWorkersAiSettings();
 var acsSettings = builder.Configuration.GetSection("AcsEmail").Get<AcsEmailSettings>() ?? new AcsEmailSettings();
 var apiProxySettings = builder.Configuration.GetSection("ApiProxy").Get<ApiProxySettings>() ?? new ApiProxySettings();
+var analyticsSettings = builder.Configuration.GetSection("CloudflareAnalytics").Get<CloudflareAnalyticsSettings>() ?? new CloudflareAnalyticsSettings();
 
 builder.Services.AddSingleton(moderationSettings);
 builder.Services.AddSingleton(cloudflareSettings);
 builder.Services.AddSingleton(acsSettings);
 builder.Services.AddSingleton(apiProxySettings);
+builder.Services.AddSingleton(analyticsSettings);
 
 // One CosmosClient/Container for the whole Function, shared by
 // CosmosModerationQuotaStore and CommentStatusWriter -- see either
@@ -91,6 +93,8 @@ builder.Services.AddSingleton<IArticleContextProvider>(sp =>
 builder.Services.AddSingleton<IArticleCountRepository>(sp => new CosmosArticleCountRepository(articlesContainer));
 builder.Services.AddSingleton<IMostViewedArticleRepository>(sp => new CosmosMostViewedArticleRepository(articlesContainer));
 builder.Services.AddSingleton<IArticleListRepository>(sp => new CosmosArticleListRepository(articlesContainer));
+builder.Services.AddSingleton<IArticleViewCountWriter>(sp => new CosmosArticleViewCountWriter(articlesContainer));
+builder.Services.AddSingleton<IViewCountWatermarkStore>(sp => new CosmosViewCountWatermarkStore(commentsContainer));
 
 builder.Services.AddSingleton(sp => new EmailClient(acsSettings.ConnectionString));
 
@@ -100,11 +104,13 @@ builder.Services.AddSingleton<IModerationQuotaStore, CosmosModerationQuotaStore>
 builder.Services.AddHttpClient<IArticleCountPublisher, ApiProxyArticleCountPublisher>();
 builder.Services.AddHttpClient<IMostViewedArticlePublisher, ApiProxyMostViewedArticlePublisher>();
 builder.Services.AddHttpClient<IArticleListPublisher, ApiProxyArticleListPublisher>();
+builder.Services.AddHttpClient<IArticleViewSource, AnalyticsEngineArticleViewSource>();
 builder.Services.AddSingleton<CommentStatusWriter>();
 builder.Services.AddSingleton<CommentModerationProcessor>();
 builder.Services.AddSingleton<StuckCommentSweeper>();
 builder.Services.AddSingleton<ArticleCountSyncProcessor>();
 builder.Services.AddSingleton<MostViewedSyncProcessor>();
 builder.Services.AddSingleton<ArticleListSyncProcessor>();
+builder.Services.AddSingleton<ViewCountFlushProcessor>();
 
 builder.Build().Run();
