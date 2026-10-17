@@ -433,8 +433,10 @@ app.post('/api/view', async (c) => {
 
 // Article views per referring site, last 30 days by default (?days=1..90),
 // for seeing where readers come from. ?slug= narrows it to one article;
-// ?source=external drops the `direct` entries (article totals and order are
-// recomputed from what is left, articles with nothing left are dropped).
+// ?source=external drops the `direct` entries and every source containing
+// "koorevaar" (blog.koorevaar.com, koorevaar.com: the user's own sites, not
+// outside referrers); article totals and order are recomputed from what is
+// left, articles with nothing left are dropped.
 // Cached for an hour per colo per variant, like /feed-subscribers.json.
 const REFERRERS_TTL_SECONDS = 3600;
 app.get('/referrers.json', async (c) => {
@@ -462,7 +464,7 @@ app.get('/referrers.json', async (c) => {
   if (externalOnly) {
     articles = articles
       .map((a) => {
-        const referrers = a.referrers.filter((r) => r.source !== 'direct');
+        const referrers = a.referrers.filter((r) => r.source !== 'direct' && !r.source.includes('koorevaar'));
         return { ...a, referrers, views: referrers.reduce((sum, r) => sum + r.views, 0) };
       })
       .filter((a) => a.views > 0)
