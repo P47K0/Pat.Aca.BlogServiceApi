@@ -12,10 +12,11 @@ export const ArticleDetailPage: FC<{
   seriesNav: SeriesNav | null;
   relatedArticles: Article[];
   comments: PublicComment[];
+  commentsUnavailable?: boolean;
   turnstileSiteKey: string;
   commentStatus?: 'success' | 'error';
   commentMessage?: string;
-}> = ({ article, seriesNav, relatedArticles, comments, turnstileSiteKey, commentStatus, commentMessage }) => {
+}> = ({ article, seriesNav, relatedArticles, comments, commentsUnavailable, turnstileSiteKey, commentStatus, commentMessage }) => {
   // marked (api-proxy) only ever emits lowercase `<img` tags, so a plain
   // substring check is enough to skip the lightbox markup/script entirely
   // on the (common) articles that have no images.
@@ -160,6 +161,7 @@ export const ArticleDetailPage: FC<{
     <CommentSection
       articleSlug={article.slug}
       comments={comments}
+      unavailable={commentsUnavailable}
       turnstileSiteKey={turnstileSiteKey}
       status={commentStatus}
       message={commentMessage}

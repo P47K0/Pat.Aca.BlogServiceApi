@@ -94,6 +94,31 @@ export async function getComments(env: Env, slug: string): Promise<PublicComment
   }
 }
 
+/** getComments with a deadline, for the article page. Comments are proxied
+ * to the API uncached, so while the container is scaled to zero a plain
+ * await held the whole page for the cold start, even when the article
+ * itself came from api-proxy's cache. Returns null when the deadline passes
+ * first; the fetch is handed to waitUntil and keeps running, so it still
+ * wakes the API for the next reader. */
+export async function getCommentsWithin(
+  env: Env,
+  slug: string,
+  timeoutMs: number,
+  waitUntil: (promise: Promise<unknown>) => void,
+): Promise<PublicComment[] | null> {
+  const pending = getComments(env, slug);
+  waitUntil(pending);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    return await Promise.race([pending, deadline]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
 export interface CommentSubmission {
   authorName: string;
   text: string;

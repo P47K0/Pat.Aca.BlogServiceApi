@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Article, Env } from './types';
 import { UpstreamError } from './types';
-import { getArticleBySlug, getArticleMarkdown, getArticles, getArticlesPage, getComments, postComment } from './lib/blog-client';
+import { getArticleBySlug, getArticleMarkdown, getArticles, getArticlesPage, getCommentsWithin, postComment } from './lib/blog-client';
 import { resolveSeriesNav, resolveRelatedArticles } from './lib/related-articles';
 import { searchAssistant, resolveSearchResults } from './lib/search-client';
 import { verifyTurnstile } from './lib/turnstile';
@@ -29,6 +29,12 @@ const app = new Hono<{ Bindings: Env }>();
 // the moment it's read on the next request, so a refresh after that always
 // sees a clean state -- and the visible URL never carries the flash at all.
 const COMMENT_FLASH_COOKIE = 'comment_flash';
+
+// How long an article page waits for its comments before rendering without
+// them. api-proxy gives the article itself 2 s before falling back to its
+// KV snapshot; comments have no snapshot (yet), so this keeps a cold API
+// from holding the page. A warm comments fetch takes well under this.
+const COMMENTS_TIMEOUT_MS = 1500;
 
 // Fixed site-level description for pages that aren't about one article (home,
 // 404, error) — there's no per-site "tagline" field anywhere to derive this
@@ -186,11 +192,15 @@ app.get('/articles/:slug', async (c) => {
   // Only fetched when this article actually references either, so the
   // majority of articles (neither field set) still cost one fetch, same as
   // before this feature.
+  // Started before the list fetch so the two run in parallel; null means
+  // the comments missed COMMENTS_TIMEOUT_MS (API cold start) and the page
+  // renders without them.
+  const commentsPromise = getCommentsWithin(c.env, article.slug, COMMENTS_TIMEOUT_MS, (p) => c.executionCtx.waitUntil(p));
   const needsArticleList = Boolean(article.seriesName) || Boolean(article.relatedSlugs?.length);
   const allArticles = needsArticleList ? await getArticles(c.env) : [];
   const seriesNav = resolveSeriesNav(article, allArticles);
   const relatedArticles = resolveRelatedArticles(article, allArticles);
-  const comments = await getComments(c.env, article.slug);
+  const comments = await commentsPromise;
 
   // Read-and-clear: set only right after the POST handler below redirects
   // back here. Deleting it immediately (not just letting maxAge expire)
@@ -246,7 +256,8 @@ app.get('/articles/:slug', async (c) => {
         article={article}
         seriesNav={seriesNav}
         relatedArticles={relatedArticles}
-        comments={comments}
+        comments={comments ?? []}
+        commentsUnavailable={comments === null}
         turnstileSiteKey={c.env.TURNSTILE_SITE_KEY}
         commentStatus={commentStatus}
         commentMessage={commentMessage}
