@@ -496,6 +496,136 @@ async function handleArticleListSync(request: Request, env: Env): Promise<Respon
   return new Response(null, { status: 204 });
 }
 
+// --- Article detail sync -------------------------------------------------
+//
+// Backs the "Extend Change-Feed push to individual article detail pages"
+// backlog item: ArticleDetailSyncFunction pushes every changed article
+// (its first run backfills all of them) with its raw Markdown `content`, as
+// stored in Cosmos. Rendered here with the same renderArticleContent the
+// origin path uses, then written to the per-slug snapshot (see "Durable
+// detail fallback" below) and, as the raw Markdown text the .md route
+// serves, to articleMarkdownKey. Both writes are skipped when nothing
+// changed; a viewCount-only Cosmos write (the hourly ViewCountFlushFunction)
+// rewrites only the rendered snapshot, the Markdown one stays as is.
+// Same shared secret as the other syncs.
+const ARTICLE_DETAIL_SYNC_PATH = '/internal/article-detail';
+
+function isValidSyncedArticleDetail(candidate: unknown): candidate is Omit<Article, 'id'> {
+  const article = candidate as Record<string, unknown> | null;
+  return (
+    typeof article?.content === 'string' &&
+    (article.unlisted === undefined || typeof article.unlisted === 'boolean') &&
+    isValidSyncedArticle({ ...article, id: 0 })
+  );
+}
+
+/** Raw-Markdown snapshot for GET /articles/{slug}.md, keyed apart from the
+ * rendered `article:{slug}` one. publishedAt is kept so a future-dated
+ * article can stay hidden when this is read. */
+interface MarkdownSnapshot {
+  publishedAt: string;
+  markdown: string;
+}
+
+function articleMarkdownKey(slug: string): string {
+  return `article-md:${slug}`;
+}
+
+async function writeMarkdownSnapshot(env: Env, slug: string, snapshot: MarkdownSnapshot): Promise<void> {
+  const value = JSON.stringify(snapshot);
+  if ((await env.ARTICLES_FALLBACK.get(articleMarkdownKey(slug))) === value) return;
+  await env.ARTICLES_FALLBACK.put(articleMarkdownKey(slug), value);
+}
+
+async function handleArticleDetailSync(request: Request, env: Env): Promise<Response> {
+  const providedKey = request.headers.get(ARTICLE_COUNT_SYNC_KEY_HEADER);
+  if (!env.ARTICLE_COUNT_SYNC_SECRET || providedKey !== env.ARTICLE_COUNT_SYNC_SECRET) {
+    return new Response(null, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+  if (!isValidSyncedArticleDetail(body)) {
+    return new Response(null, { status: 400 });
+  }
+
+  // Same shape and field order as an origin response (id is always 0
+  // there too), so a snapshot from either producer compares equal.
+  const article: Article = {
+    id: 0,
+    slug: body.slug,
+    title: body.title,
+    summary: body.summary,
+    content: body.content,
+    publishedAt: body.publishedAt,
+    tags: body.tags,
+    viewCount: body.viewCount,
+    linkedinVideoEmbedUrl: body.linkedinVideoEmbedUrl ?? null,
+    seriesName: body.seriesName ?? null,
+    seriesOrder: body.seriesOrder ?? null,
+    relatedSlugs: body.relatedSlugs ?? null,
+    unlisted: body.unlisted ?? false,
+    coverImageUrl: body.coverImageUrl ?? null,
+    seoDescription: body.seoDescription ?? null,
+    seoKeywords: body.seoKeywords ?? null,
+    updatedAt: body.updatedAt ?? null,
+  };
+  await writeDetailFallbackSnapshotFromArticle(env, article.slug, renderArticleContent(article));
+  await writeMarkdownSnapshot(env, article.slug, { publishedAt: article.publishedAt, markdown: articleMarkdown(article) });
+  return new Response(null, { status: 204 });
+}
+
+// --- Comments sync ---------------------------------------------------------
+//
+// CommentsSyncFunction (on every Comments change) and
+// CommentsTimerSyncFunction (every 15 minutes, for deletes) push every
+// published comment, grouped by article slug, in the API's PublicComment
+// shape. Stored whole under one key, written only when it changed.
+const COMMENTS_SYNC_PATH = '/internal/comments';
+const PUBLISHED_COMMENTS_KV_KEY = 'published-comments';
+
+function isValidPublicComment(candidate: unknown): boolean {
+  const comment = candidate as Record<string, unknown> | null;
+  return (
+    typeof comment?.id === 'string' &&
+    typeof comment.authorName === 'string' &&
+    typeof comment.text === 'string' &&
+    typeof comment.createdAt === 'string'
+  );
+}
+
+async function handleCommentsSync(request: Request, env: Env): Promise<Response> {
+  const providedKey = request.headers.get(ARTICLE_COUNT_SYNC_KEY_HEADER);
+  if (!env.ARTICLE_COUNT_SYNC_SECRET || providedKey !== env.ARTICLE_COUNT_SYNC_SECRET) {
+    return new Response(null, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+
+  const comments = (body as { comments?: unknown } | null)?.comments;
+  if (
+    typeof comments !== 'object' || comments === null || Array.isArray(comments) ||
+    !Object.values(comments).every((list) => Array.isArray(list) && list.every(isValidPublicComment))
+  ) {
+    return new Response(null, { status: 400 });
+  }
+
+  const value = JSON.stringify(comments);
+  if ((await env.ARTICLES_FALLBACK.get(PUBLISHED_COMMENTS_KV_KEY)) !== value) {
+    await env.ARTICLES_FALLBACK.put(PUBLISHED_COMMENTS_KV_KEY, value);
+  }
+  return new Response(null, { status: 204 });
+}
+
 // --- Article markdown --------------------------------------------------
 //
 // GET /articles/{slug}.md and GET /about.md serve the raw Markdown `content`
@@ -541,10 +671,14 @@ async function fetchArticleMarkdown(env: Env, slug: string): Promise<Response> {
   const article = (await upstreamResponse.json()) as Article;
   headers.set('Content-Type', 'text/markdown; charset=utf-8');
   headers.set(CACHED_AT_HEADER, String(Date.now()));
-  // Under a thematic break, the shape the byline had when it still lived
-  // inside `content`.
-  const markdown = article.unlisted ? article.content : `${article.content.trimEnd()}\n\n---\n\n${ARTICLE_FOOTER}\n`;
-  return new Response(markdown, { status: 200, headers });
+  return new Response(articleMarkdown(article), { status: 200, headers });
+}
+
+/** The .md body for an article whose `content` is still raw Markdown:
+ * listed articles get ARTICLE_FOOTER under a thematic break, the shape the
+ * byline had when it still lived inside `content`. */
+function articleMarkdown(article: Article): string {
+  return article.unlisted ? article.content : `${article.content.trimEnd()}\n\n---\n\n${ARTICLE_FOOTER}\n`;
 }
 
 async function proxyArticleMarkdownRequest(
@@ -618,11 +752,16 @@ function articleContentEquals(a: Article, b: Article): boolean {
     a.summary === b.summary &&
     a.content === b.content &&
     a.footer === b.footer &&
-    a.publishedAt === b.publishedAt &&
-    a.linkedinVideoEmbedUrl === b.linkedinVideoEmbedUrl &&
-    a.coverImageUrl === b.coverImageUrl &&
-    a.seoDescription === b.seoDescription &&
+    Date.parse(a.publishedAt) === Date.parse(b.publishedAt) &&
+    (a.linkedinVideoEmbedUrl ?? null) === (b.linkedinVideoEmbedUrl ?? null) &&
+    (a.coverImageUrl ?? null) === (b.coverImageUrl ?? null) &&
+    (a.seoDescription ?? null) === (b.seoDescription ?? null) &&
     (a.seoKeywords ?? []).join('\n') === (b.seoKeywords ?? []).join('\n') &&
+    (a.seriesName ?? null) === (b.seriesName ?? null) &&
+    (a.seriesOrder ?? null) === (b.seriesOrder ?? null) &&
+    (a.relatedSlugs ?? []).join('\n') === (b.relatedSlugs ?? []).join('\n') &&
+    (a.unlisted ?? false) === (b.unlisted ?? false) &&
+    instantOrNull(a.updatedAt) === instantOrNull(b.updatedAt) &&
     a.tags.length === b.tags.length &&
     a.tags.every((tag, i) => tag === b.tags[i])
   );
@@ -829,8 +968,13 @@ function extractSlug(pathname: string): string {
 }
 
 async function writeDetailFallbackSnapshot(env: Env, slug: string, articleResponse: Response): Promise<void> {
-  const article = (await articleResponse.json()) as Article;
+  await writeDetailFallbackSnapshotFromArticle(env, slug, (await articleResponse.json()) as Article);
+}
 
+/** Shared by both writers of `article:{slug}`: an origin fetch
+ * (writeDetailFallbackSnapshot) and ArticleDetailSyncFunction's push
+ * (handleArticleDetailSync). `article` is already rendered. */
+async function writeDetailFallbackSnapshotFromArticle(env: Env, slug: string, article: Article): Promise<void> {
   const existing = await env.ARTICLES_FALLBACK.get(detailFallbackKey(slug));
   const stored = existing ? (JSON.parse(existing) as Article) : null;
   if (stored && articleContentEquals(stored, article) && stored.viewCount === article.viewCount) {
@@ -1008,6 +1152,14 @@ export default {
     // own server-to-server call.
     if (request.method === 'POST' && pathname === ARTICLE_LIST_SYNC_PATH) {
       return handleArticleListSync(request, env);
+    }
+
+    // Same: ArticleDetailSyncFunction's and CommentsSyncFunction's calls.
+    if (request.method === 'POST' && pathname === ARTICLE_DETAIL_SYNC_PATH) {
+      return handleArticleDetailSync(request, env);
+    }
+    if (request.method === 'POST' && pathname === COMMENTS_SYNC_PATH) {
+      return handleCommentsSync(request, env);
     }
 
     // The one *public* non-GET route this Worker supports — everything
