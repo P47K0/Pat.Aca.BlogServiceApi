@@ -23,14 +23,21 @@ const MAX_EMAIL_LENGTH = 254;
 export const CommentSection: FC<{
   articleSlug: string;
   comments: PublicComment[];
+  /** True when the comments didn't arrive in time (API cold start), so
+   * an empty list would wrongly read as "no comments". */
+  unavailable?: boolean;
   turnstileSiteKey: string;
   status?: 'success' | 'error';
   message?: string;
-}> = ({ articleSlug, comments, turnstileSiteKey, status, message }) => (
+}> = ({ articleSlug, comments, unavailable, turnstileSiteKey, status, message }) => (
   <div class="mt-6 rounded-2xl bg-white p-6 shadow-sm">
     <h2 class="text-lg font-semibold text-gray-900">
       Comments{comments.length > 0 && ` (${comments.length})`}
     </h2>
+
+    {unavailable && (
+      <p class="mt-4 text-sm text-gray-500">Comments are still loading. Refresh the page in a moment to see them.</p>
+    )}
 
     {comments.length > 0 && (
       <ul class="mt-4 space-y-4">
