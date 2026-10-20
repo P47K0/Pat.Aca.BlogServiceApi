@@ -1,6 +1,5 @@
 """Sync the `about` article (served as /about.md) and its KnowledgeBase embeddings
-from the homepage export. Run by Claude Code on request, in the container where
-local Ollama is reachable. Python stdlib only.
+from the homepage export. Run by Claude Code on request. Python stdlib only.
 
     git clone --depth 1 https://github.com/P47K0/website.git
     python3 website/scripts/export_about_md.py > about.md
@@ -9,7 +8,8 @@ local Ollama is reachable. Python stdlib only.
 
 Steps: GET the current article; stop if the content is unchanged. Otherwise PUT
 the article with only `content` replaced, then embed every blank-line paragraph
-plus the "{title}. {summary}" chunk with bge-m3 and write them to KnowledgeBase
+plus the "{title}. {summary}" chunk with bge-m3 (tools/embeddings: Workers AI
+first, ACA fallback) and write them to KnowledgeBase
 as about-paragraph-{n} / about-summary (PUT to replace, POST on 404). Each
 paragraph also carries `sectionAnchor`, the homepage section id of the `## `
 heading it sits under (SECTION_ANCHORS), which /ask returns so the widget can
@@ -23,7 +23,8 @@ the leftover about-paragraph-{n} ids are printed at the end and have to be
 deleted by hand (partition "article"), or /ask keeps retrieving the old text.
 
 Credentials come from the environment (ARTICLES_API_KEY, BLOGAPI_AZURE_*,
-KNOWLEDGEBASE_AZURE_*); access tokens are kept in memory only.
+KNOWLEDGEBASE_AZURE_*, plus the embedding variables listed in
+tools/embeddings/embeddings.py); access tokens are kept in memory only.
 """
 import http.client
 import json
@@ -35,11 +36,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "embeddings"))
+from embeddings import embed  # noqa: E402
+
 API = "https://blog-service-api.whitewater-2e220d9b.westeurope.azurecontainerapps.io"
 API_SCOPE = "api://e8ee7301-50bc-47d4-be05-b82df54b498f/.default"
 COSMOS = "https://cosmos-koorevaar.documents.azure.com"
 COLL = "/dbs/AssistantDB/colls/KnowledgeBase"
-OLLAMA = "http://host.docker.internal:11434/api/embed"
 SLUG = "about"
 E = os.environ
 
@@ -125,14 +128,6 @@ def section_anchors(paragraphs):
     return anchors
 
 
-def embed(texts):
-    s, j = req("POST", OLLAMA, {"Content-Type": "application/json"}, {"model": "bge-m3", "input": texts})
-    assert s == 200, (s, j)
-    vecs = j["embeddings"]
-    assert len(vecs) == len(texts) and all(len(v) == 1024 for v in vecs)
-    return vecs
-
-
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) != 1:
@@ -182,9 +177,7 @@ def write_embeddings(article, new_chunks):
     anchors = section_anchors(new_chunks)
     docs = [(f"{SLUG}-paragraph-{i}", "paragraph", t, anchors[i]) for i, t in enumerate(new_chunks)]
     docs.append((f"{SLUG}-summary", "summary", f"{article['title']}. {article['summary']}", None))
-    vecs = []
-    for i in range(0, len(docs), 16):
-        vecs += embed([d[2] for d in docs[i:i + 16]])
+    vecs = embed([d[2] for d in docs])
 
     kb = token("KNOWLEDGEBASE", f"{COSMOS}/.default")
     h = {
