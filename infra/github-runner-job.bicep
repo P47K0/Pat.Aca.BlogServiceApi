@@ -47,6 +47,10 @@ param pollingIntervalSeconds int = 30
 @minValue(60)
 param replicaTimeoutSeconds int = 2700
 
+@description('Seconds a runner waits for its first job before it stops. A runner whose job the laptop took first would otherwise idle, billed, until the replica timeout. 0 = no idle exit.')
+@minValue(0)
+param idleTimeoutSeconds int = 300
+
 @description('vCPU per runner')
 param cpu string = '2.0'
 
@@ -136,6 +140,10 @@ resource runnerJob 'Microsoft.App/jobs@2024-03-01' = {
             {
               name: 'RUNNER_LABELS'
               value: runnerLabels
+            }
+            {
+              name: 'RUNNER_IDLE_TIMEOUT_SECONDS'
+              value: string(idleTimeoutSeconds)
             }
           ]
         }
