@@ -74,7 +74,14 @@ Nothing here is specific to this repo. The image (`runner/aca`) and the job (`in
 
 **How it fits with the laptop runner.** Both register with the labels `self-hosted` and `Linux`, so a workflow's `runs-on` is the same for both and GitHub gives a queued job to whichever idle runner takes it first. An idle laptop takes it within a second or two, before the scaler's next check, so ACA mostly starts for the overflow, or for everything while the laptop is off. An ACA runner that finds its job already taken waits until the job's replica timeout (30 minutes by default, `replicaTimeoutSeconds`) and is billed meanwhile; lower it if your jobs are short. Expect 30 to 60 seconds before a job starts on ACA (the scaler's check, the container start, the registration).
 
-**What the image holds.** Azure CLI, Node with wrangler, and Chromium for Playwright (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`); optionally the .NET SDK (workflow input `dotnet`). Each is a build argument in `runner/aca/Dockerfile`; switch off what the target repos don't use to keep the image small. There is no Docker on ACA (no privileged containers), so a workflow that builds an image with the local Docker daemon, like this repo's Deploy workflow, has to stay on the laptop. Only use this with private repositories: anyone who can run a workflow in a repo can run code on its self-hosted runners. The token is dropped from the runner's environment before the job starts, but it is a secret of the job in ACA.
+**What the image holds.** git, curl, jq, zip/unzip, the GitHub CLI, rclone, Azure CLI, Node with wrangler (also in the runner's tool cache, so `actions/setup-node` doesn't download it), and Chromium for Playwright (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`); optionally the .NET SDK (workflow input `dotnet`). The actions listed in the `PREFETCH_ACTIONS` build argument are cached in the image too, so a job doesn't download them. Each of these is a build argument in `runner/aca/Dockerfile`; switch off what the target repos don't use to keep the image small.
+
+**What a workflow must do differently on ACA.** The container has no sudo ("no new privileges"), and no Docker (no privileged containers). So:
+- `npx playwright install --with-deps chromium` fails, because `--with-deps` calls sudo. The libraries are already in the image: run it without `--with-deps` when `sudo -n true` fails.
+- `curl ... | sudo bash` installers fail. Guard them with `command -v <tool> >/dev/null || ...` for tools the image has (rclone), or add the tool to the Dockerfile.
+- A workflow that builds an image with the local Docker daemon, like this repo's Deploy workflow, has to stay on the laptop.
+
+Only use this with private repositories: anyone who can run a workflow in a repo can run code on its self-hosted runners. The token is dropped from the runner's environment before the job starts, but it is a secret of the job in ACA.
 
 ## API
 
