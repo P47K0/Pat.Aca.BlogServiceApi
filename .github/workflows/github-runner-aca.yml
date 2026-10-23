@@ -1,0 +1,128 @@
+name: GitHub Runner on ACA
+
+# Builds the runner image (runner/aca) and creates or updates the Container Apps Job that runs
+# ephemeral runners for one repository or organisation (infra/github-runner-job.bicep). Run it once
+# per target repo; the job name is derived from the repo, so a second run for the same repo updates
+# its job. Manual only: it provisions real Azure resources.
+#
+# Needs the repo secret RUNNER_GITHUB_PAT: a fine-grained token for the target repo(s) with
+# Administration: Read and write (registers runners) and Actions: Read (the scaler reads the queue).
+# For scope org: the classic scope admin:org, or the organisation's equivalent fine-grained permission.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'repo = runners for one repository, org = for an organisation'
+        type: choice
+        options: [repo, org]
+        default: repo
+      owner:
+        description: 'GitHub user or organisation (blank = owner of this repo)'
+        type: string
+        default: ''
+      repo:
+        description: 'Repository name for scope repo (blank = this repo)'
+        type: string
+        default: ''
+      labels:
+        description: 'Runner labels, comma-separated; keep equal to the laptop runner'
+        type: string
+        default: 'self-hosted,Linux'
+      max_parallel:
+        description: 'Most runners at the same time'
+        type: string
+        default: '4'
+      build_image:
+        description: 'Build and push the image first (off = deploy the existing :latest)'
+        type: boolean
+        default: true
+      dotnet:
+        description: 'Include the .NET SDK in the image (only when building)'
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    # Repo variable RUNNER (e.g. "self-hosted") picks the runner; unset = GitHub-hosted. The image
+    # build needs Docker, so this workflow can't run on the ACA runners it creates.
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      ACA_ENV_NAME: ${{ vars.ACA_ENVIRONMENT_NAME }}
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      SCOPE: ${{ inputs.scope }}
+      OWNER: ${{ inputs.owner || github.repository_owner }}
+      REPO: ${{ inputs.repo || github.event.repository.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        if: ${{ inputs.build_image }}
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: ${{ vars.RUNNER == 'self-hosted' && 'docker' || 'docker-container' }}
+
+      - name: Login to Docker Hub
+        if: ${{ inputs.build_image }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        if: ${{ inputs.build_image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: runner/aca
+          push: true
+          build-args: |
+            INSTALL_DOTNET=${{ inputs.dotnet }}
+          tags: |
+            ${{ vars.DOCKERHUB_USERNAME }}/github-runner:latest
+            ${{ vars.DOCKERHUB_USERNAME }}/github-runner:gha-${{ github.run_id }}
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy runner job (Bicep)
+        shell: bash
+        env:
+          RUNNER_GITHUB_PAT: ${{ secrets.RUNNER_GITHUB_PAT }}
+          LABELS: ${{ inputs.labels }}
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
+          IMAGE_TAG: ${{ inputs.build_image && format('gha-{0}', github.run_id) || 'latest' }}
+        run: |
+          set -euo pipefail
+
+          # Lowercase letters, digits and hyphens, at most 32 characters (the ACA job name rules).
+          if [ "$SCOPE" = "org" ]; then target="$OWNER"; REPO=""; else target="$REPO"; fi
+          JOB_NAME=$(echo "gh-runner-$target" | tr '[:upper:]_.' '[:lower:]--' | cut -c1-32 | sed 's/-*$//')
+
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "github-runner-$JOB_NAME" \
+            --template-file infra/github-runner-job.bicep \
+            --parameters \
+              environmentName="$ACA_ENV_NAME" \
+              jobName="$JOB_NAME" \
+              image="$DOCKERHUB_USERNAME/github-runner:$IMAGE_TAG" \
+              runnerScope="$SCOPE" \
+              githubOwner="$OWNER" \
+              githubRepo="$REPO" \
+              runnerLabels="$LABELS" \
+              maxParallel="$MAX_PARALLEL" \
+              githubPat="$RUNNER_GITHUB_PAT"
+
+          echo "::notice::Container Apps Job $JOB_NAME deployed with image $DOCKERHUB_USERNAME/github-runner:$IMAGE_TAG"
