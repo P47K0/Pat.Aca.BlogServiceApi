@@ -24,9 +24,9 @@ ARG PREFETCH_ACTIONS="actions/checkout@v4 actions/setup-node@v4 actions/upload-a
 USER root
 
 # What the workflows expect from ubuntu-latest: git, curl, jq, zip/unzip, xz (Node tarballs) and the
-# GitHub CLI, plus Azure CLI for azure/login and the az steps.
+# GitHub CLI, procps (pgrep, for the entrypoint's idle exit), plus Azure CLI for azure/login and the az steps.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git jq unzip xz-utils zip \
+ && apt-get install -y --no-install-recommends ca-certificates curl git jq procps unzip xz-utils zip \
  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \

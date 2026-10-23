@@ -10,6 +10,7 @@
 #   GITHUB_REPO     repository name (scope repo only)
 #   RUNNER_LABELS   comma-separated, e.g. self-hosted,Linux
 #   GITHUB_API_URL  optional, default https://api.github.com
+#   RUNNER_IDLE_TIMEOUT_SECONDS  optional, default 300; 0 = wait for a job until the replica timeout
 set -euo pipefail
 
 : "${GITHUB_PAT:?GITHUB_PAT is not set}"
@@ -40,4 +41,40 @@ jit=$(jq -er '.encoded_jit_config' <<<"$response")
 unset GITHUB_PAT response
 
 echo "Starting ephemeral runner $name for $scope_path with labels $RUNNER_LABELS"
-exec ./run.sh --jitconfig "$jit"
+
+# The scaler starts a runner for every queued job it sees, but another runner (the laptop) may take
+# that job first. A runner without a job would then wait, and be billed, until the replica timeout.
+# GitHub hands a queued job to an idle runner within seconds, so a runner that has not started one
+# after RUNNER_IDLE_TIMEOUT_SECONDS is surplus: stop it and end the execution successfully. The wait is
+# long enough that a job queued a little later in the same workflow (behind a `needs:`) still finds it.
+idle=${RUNNER_IDLE_TIMEOUT_SECONDS:-300}
+log=$(mktemp)
+
+killtree() {
+  local child
+  for child in $(pgrep -P "$1" || true); do killtree "$child"; done
+  kill -TERM "$1" 2>/dev/null || true
+}
+
+./run.sh --jitconfig "$jit" > >(tee "$log") 2>&1 &
+runner=$!
+
+watchdog=""
+if [ "$idle" -gt 0 ]; then
+  (
+    sleep "$idle"
+    # The runner prints "Running job: <name>" when it accepts one; its Worker process exists while it runs.
+    if ! grep -q 'Running job:' "$log" && ! pgrep -f Runner.Worker >/dev/null; then
+      echo "No job after ${idle}s, another runner probably took it. Stopping."
+      touch "$log.idle"
+      killtree "$runner"
+    fi
+  ) &
+  watchdog=$!
+fi
+
+code=0
+wait "$runner" || code=$?
+[ -z "$watchdog" ] || killtree "$watchdog"
+[ ! -e "$log.idle" ] || exit 0
+exit "$code"
