@@ -45,7 +45,7 @@ param pollingIntervalSeconds int = 30
 
 @description('Seconds a runner may live. A runner that never gets a job (the laptop took it first) idles, and is billed, until this ends; a longer job needs a longer timeout.')
 @minValue(60)
-param replicaTimeoutSeconds int = 1800
+param replicaTimeoutSeconds int = 2700
 
 @description('vCPU per runner')
 param cpu string = '2.0'
