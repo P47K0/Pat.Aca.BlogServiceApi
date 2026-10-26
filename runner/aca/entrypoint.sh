@@ -56,7 +56,10 @@ killtree() {
   kill -TERM "$1" 2>/dev/null || true
 }
 
-./run.sh --jitconfig "$jit" > >(tee "$log") 2>&1 &
+# The runner's diagnostic lines ("[RUNNER ...]", "[WORKER ...]": ~7,500 lines, 3 MB per job) go to the
+# temp file only. Every console line is billed as a Log Analytics row, and GitHub keeps the job's own log.
+# The idle check below still reads them from the file; a failed run prints the tail of it.
+./run.sh --jitconfig "$jit" > >(tee "$log" | grep --line-buffered -Ev '^\[(RUNNER|WORKER) ') 2>&1 &
 runner=$!
 
 watchdog=""
@@ -76,5 +79,9 @@ fi
 code=0
 wait "$runner" || code=$?
 [ -z "$watchdog" ] || killtree "$watchdog"
+if [ "$code" -ne 0 ] && [ ! -e "$log.idle" ]; then
+  echo "Runner exited with code $code. Last diagnostic lines:"
+  tail -n 200 "$log"
+fi
 [ ! -e "$log.idle" ] || exit 0
 exit "$code"
