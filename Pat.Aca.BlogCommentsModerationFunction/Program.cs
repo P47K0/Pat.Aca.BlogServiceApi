@@ -10,7 +10,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
-using OpenTelemetry.Metrics;
 using Pat.Aca.BlogCommentsModerationFunction;
 
 var builder = FunctionsApplication.CreateBuilder(args);
@@ -19,20 +18,9 @@ builder.ConfigureFunctionsWebApplication();
 
 if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("APPLICATIONINSIGHTS_CONNECTION_STRING")))
 {
-    // Traces, requests, dependencies and logs stay on. Metrics are off: between
-    // 2026-09-25 and 2026-10-25 AppMetrics (runtime, Kestrel, HTTP server and
-    // process meters) and AppPerformanceCounters were 85% of the workspace's
-    // ingested volume, ~35 MB/day growing to ~130 MB/day as the Change Feed and
-    // timer functions were added: roughly EUR 0.30 a day on a blog that nothing
-    // alerts on. The Drop view discards every instrument before export.
     builder.Services.AddOpenTelemetry()
         .UseFunctionsWorkerDefaults()
-        .WithMetrics(metrics => metrics.AddView(_ => MetricStreamConfiguration.Drop))
-        .UseAzureMonitorExporter(options =>
-        {
-            options.EnablePerformanceCounters = false;
-            options.EnableStandardMetrics = false;
-        });
+        .UseAzureMonitorExporter();
 }
 
 // Plain-POCO-singleton config binding throughout, same convention as the
