@@ -216,6 +216,13 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
           name: 'APPLICATIONINSIGHTS_AUTHENTICATION_STRING'
           value: 'Authorization=AAD'
         }
+        // No OpenTelemetry metrics exporter. Set by hand in the portal on 2026-10-26 to stop the host's
+        // runtime/Kestrel/HTTP metrics (~85% of this workspace's ingestion); kept here so an infra
+        // run does not remove it. Whether it has any effect is unverified: the metrics kept flowing.
+        {
+          name: 'OTEL_METRICS_EXPORTER'
+          value: 'none'
+        }
         // This Function's own CosmosSettings binding (Program.cs) --
         // EndpointUri/Database, no PrimaryKey, since production always
         // goes through DefaultAzureCredential.
