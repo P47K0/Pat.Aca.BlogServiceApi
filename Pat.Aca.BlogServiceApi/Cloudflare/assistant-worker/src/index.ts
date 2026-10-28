@@ -13,6 +13,7 @@ import { getEmbeddingsCount } from './lib/embeddings-count';
 import { addRecentAnswerIfReal, getRecentAnswers } from './lib/recent-answers';
 import { pickSourceArticle } from './lib/source-link';
 import { pickContactLink } from './lib/contact-link';
+import { isAssistantDisabled, markUnavailable, unavailableResponse } from './lib/availability';
 
 const CACHE_INVALIDATION_KEY_HEADER = 'X-Cache-Invalidation-Key';
 const EMBEDDINGS_COUNT_KEY_HEADER = 'X-Embeddings-Count-Key';
@@ -44,6 +45,10 @@ interface AskRequestBody {
  * miss queries KnowledgeBase directly (populating the cache for next time),
  * then generates a grounded answer from whichever chunks were found. */
 async function handleAsk(request: Request, env: Env, ctx: ExecutionContext, clientIp: string): Promise<Response> {
+  if (await isAssistantDisabled(env.ASSISTANT_CACHE)) {
+    return unavailableResponse();
+  }
+
   // Cheapest possible fail point: rejects an over-quota IP before spending
   // anything on embedding/retrieval/generation, all of which cost real
   // Workers AI neurons or Cosmos RUs.
@@ -84,7 +89,15 @@ async function handleAsk(request: Request, env: Env, ctx: ExecutionContext, clie
     chunks = cached.chunks;
     cache = 'hit';
   } else {
-    chunks = await retrieveChunks(env, questionEmbedding);
+    try {
+      chunks = await retrieveChunks(env, questionEmbedding);
+    } catch (error) {
+      // Cosmos is the one dependency outside Cloudflare: when it is down
+      // (e.g. the Azure credits ran out) stop asking it for a while.
+      console.error('Cosmos retrieval failed:', error);
+      await markUnavailable(env.ASSISTANT_CACHE);
+      return unavailableResponse();
+    }
     await addCacheEntry(env.ASSISTANT_CACHE, { questionEmbedding, chunks, cachedAt: new Date().toISOString() });
     cache = 'miss';
   }
@@ -208,6 +221,10 @@ async function handleSearch(request: Request, env: Env): Promise<Response> {
     return new Response('Unauthorized', { status: 401 });
   }
 
+  if (await isAssistantDisabled(env.ASSISTANT_CACHE)) {
+    return unavailableResponse();
+  }
+
   const clientIp = request.headers.get(REAL_CLIENT_IP_HEADER) ?? 'unknown';
   const withinLimit = await checkRateLimit(env.ASSISTANT_CACHE, clientIp, SEARCH_RATE_LIMIT);
   if (!withinLimit) {
@@ -227,8 +244,23 @@ async function handleSearch(request: Request, env: Env): Promise<Response> {
       : SEARCH_RESULT_LIMIT_DEFAULT;
 
   const queryEmbedding = await embedText(env.AI, query);
-  const results = await searchArticles(env, queryEmbedding, limit);
-  return Response.json({ results });
+  try {
+    const results = await searchArticles(env, queryEmbedding, limit);
+    return Response.json({ results });
+  } catch (error) {
+    console.error('Cosmos search failed:', error);
+    await markUnavailable(env.ASSISTANT_CACHE);
+    return unavailableResponse();
+  }
+}
+
+/** GET /status — public, read by the homepage widget on load to decide
+ * whether to show itself at all. Cached by the browser for 5 minutes so it
+ * costs one KV read per visitor per 5 minutes, and a recovery shows up within
+ * that window. */
+async function handleStatus(env: Env): Promise<Response> {
+  const available = !(await isAssistantDisabled(env.ASSISTANT_CACHE));
+  return Response.json({ available }, { headers: { 'Cache-Control': 'public, max-age=300' } });
 }
 
 export default {
@@ -256,6 +288,10 @@ export default {
       // Every response needs CORS headers, not just the success path --
       // see cors.ts's own comment for why error responses matter here too.
       return withCors(response, env.ALLOWED_ORIGIN);
+    }
+
+    if (url.pathname === '/status' && request.method === 'GET') {
+      return withCors(await handleStatus(env), env.ALLOWED_ORIGIN);
     }
 
     if (url.pathname === '/internal/invalidate-cache' && request.method === 'POST') {
