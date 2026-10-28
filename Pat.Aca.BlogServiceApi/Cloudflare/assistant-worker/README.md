@@ -73,6 +73,13 @@ project's own conventions:
     agree on (>= 2 chunks, or one chunk >= 0.7), else `null`. The widget renders it as a link;
     `answer` itself is unchanged.
 
+## Switching the assistant off
+
+`GET /status` returns `{"available": true|false}` (cached 5 minutes) and the homepage widget hides itself when it is `false`; `/ask` and `/search` answer 503 meanwhile. The switch is the KV key `assistant:disabled` on `ASSISTANT_CACHE`:
+
+- It is set automatically for 4 hours when the Cosmos lookup fails (e.g. the Azure credits ran out). The next request after that tries again.
+- By hand, to hide the assistant for a day: `wrangler kv key put assistant:disabled 1 --binding ASSISTANT_CACHE --ttl 86400`. Bring it back early with `wrangler kv key delete assistant:disabled --binding ASSISTANT_CACHE`.
+
 ## Setup
 
 ```bash
