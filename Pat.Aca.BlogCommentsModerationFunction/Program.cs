@@ -31,6 +31,7 @@ var moderationSettings = builder.Configuration.GetSection("Moderation").Get<Mode
 var cloudflareSettings = builder.Configuration.GetSection("CloudflareWorkersAi").Get<CloudflareWorkersAiSettings>() ?? new CloudflareWorkersAiSettings();
 var acsSettings = builder.Configuration.GetSection("AcsEmail").Get<AcsEmailSettings>() ?? new AcsEmailSettings();
 var apiProxySettings = builder.Configuration.GetSection("ApiProxy").Get<ApiProxySettings>() ?? new ApiProxySettings();
+var indexNowSettings = builder.Configuration.GetSection("IndexNow").Get<IndexNowSettings>() ?? new IndexNowSettings();
 var analyticsSettings = builder.Configuration.GetSection("CloudflareAnalytics").Get<CloudflareAnalyticsSettings>() ?? new CloudflareAnalyticsSettings();
 
 builder.Services.AddSingleton(moderationSettings);
@@ -38,6 +39,7 @@ builder.Services.AddSingleton(cloudflareSettings);
 builder.Services.AddSingleton(acsSettings);
 builder.Services.AddSingleton(apiProxySettings);
 builder.Services.AddSingleton(analyticsSettings);
+builder.Services.AddSingleton(indexNowSettings);
 
 // One CosmosClient/Container for the whole Function, shared by
 // CosmosModerationQuotaStore and CommentStatusWriter -- see either
@@ -107,6 +109,7 @@ builder.Services.AddHttpClient<IMostViewedArticlePublisher, ApiProxyMostViewedAr
 builder.Services.AddHttpClient<IArticleListPublisher, ApiProxyArticleListPublisher>();
 builder.Services.AddHttpClient<IArticleViewSource, AnalyticsEngineArticleViewSource>();
 builder.Services.AddHttpClient<IArticleDetailPublisher, ApiProxyArticleDetailPublisher>();
+builder.Services.AddHttpClient<IIndexNowPublisher, IndexNowPublisher>();
 builder.Services.AddHttpClient<IPublishedCommentsPublisher, ApiProxyPublishedCommentsPublisher>();
 builder.Services.AddSingleton<CommentStatusWriter>();
 builder.Services.AddSingleton<CommentModerationProcessor>();
@@ -116,6 +119,7 @@ builder.Services.AddSingleton<MostViewedSyncProcessor>();
 builder.Services.AddSingleton<ArticleListSyncProcessor>();
 builder.Services.AddSingleton<ViewCountFlushProcessor>();
 builder.Services.AddSingleton<ArticleDetailSyncProcessor>();
+builder.Services.AddSingleton<IndexNowSyncProcessor>();
 builder.Services.AddSingleton<CommentsSyncProcessor>();
 
 builder.Build().Run();
