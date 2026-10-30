@@ -5,6 +5,9 @@ import type { FC, PropsWithChildren } from 'hono/jsx';
 export const SITE_AUTHOR = {
   name: 'Patrick Koorevaar',
   url: 'https://www.koorevaar.com/',
+  /** JSON-LD @id of the Person entity defined on www's homepage, so the blog's
+   * author resolves to that same entity instead of a separate anonymous one. */
+  id: 'https://www.koorevaar.com/#person',
 } as const;
 
 export interface SeoProps {

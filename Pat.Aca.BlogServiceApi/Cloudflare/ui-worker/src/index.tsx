@@ -248,7 +248,7 @@ app.get('/articles/:slug', async (c) => {
         dateModified: article.updatedAt ?? article.publishedAt,
         url: canonicalUrl,
         keywords: seoKeywords.join(', '),
-        author: { '@type': 'Person', name: SITE_AUTHOR.name, url: SITE_AUTHOR.url },
+        author: { '@type': 'Person', '@id': SITE_AUTHOR.id, name: SITE_AUTHOR.name, url: SITE_AUTHOR.url },
         ...(article.coverImageUrl ? { image: article.coverImageUrl } : {}),
       }}
     >
