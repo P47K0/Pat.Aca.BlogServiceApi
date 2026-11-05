@@ -91,7 +91,8 @@ builder.Services.AddSingleton<IArticleContextProvider>(sp =>
 // above via closure, same reasoning as that registration's own comment --
 // no second Container/client for the same container.
 builder.Services.AddSingleton<IArticleCountRepository>(sp => new CosmosArticleCountRepository(articlesContainer));
-builder.Services.AddSingleton<IMostViewedArticleRepository>(sp => new CosmosMostViewedArticleRepository(articlesContainer));
+builder.Services.AddSingleton<IMostViewedArticleRepository>(sp =>
+    new CosmosMostViewedArticleRepository(articlesContainer, sp.GetRequiredService<IExternalReferrerViewSource>()));
 builder.Services.AddSingleton<IArticleListRepository>(sp => new CosmosArticleListRepository(articlesContainer));
 builder.Services.AddSingleton<IArticleViewCountWriter>(sp => new CosmosArticleViewCountWriter(articlesContainer));
 builder.Services.AddSingleton<IViewCountWatermarkStore>(sp => new CosmosViewCountWatermarkStore(commentsContainer));
@@ -106,6 +107,7 @@ builder.Services.AddHttpClient<IArticleCountPublisher, ApiProxyArticleCountPubli
 builder.Services.AddHttpClient<IMostViewedArticlePublisher, ApiProxyMostViewedArticlePublisher>();
 builder.Services.AddHttpClient<IArticleListPublisher, ApiProxyArticleListPublisher>();
 builder.Services.AddHttpClient<IArticleViewSource, AnalyticsEngineArticleViewSource>();
+builder.Services.AddHttpClient<IExternalReferrerViewSource, AnalyticsEngineArticleViewSource>();
 builder.Services.AddHttpClient<IArticleDetailPublisher, ApiProxyArticleDetailPublisher>();
 builder.Services.AddHttpClient<IPublishedCommentsPublisher, ApiProxyPublishedCommentsPublisher>();
 builder.Services.AddSingleton<CommentStatusWriter>();

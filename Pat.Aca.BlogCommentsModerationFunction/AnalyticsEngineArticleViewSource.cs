@@ -11,7 +11,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
     /// slug; see ui-worker lib/referrer-analytics.ts). Counts are
     /// sum(_sample_interval), so they stay right if Analytics Engine samples.
     /// </summary>
-    public sealed class AnalyticsEngineArticleViewSource(HttpClient httpClient, CloudflareAnalyticsSettings settings) : IArticleViewSource
+    public sealed class AnalyticsEngineArticleViewSource(HttpClient httpClient, CloudflareAnalyticsSettings settings) : IArticleViewSource, IExternalReferrerViewSource
     {
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -21,9 +21,14 @@ namespace Pat.Aca.BlogCommentsModerationFunction
             NumberHandling = JsonNumberHandling.AllowReadingFromString
         };
 
-        public async Task<IReadOnlyDictionary<string, long>> GetViewsAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyDictionary<string, long>> GetViewsAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default) =>
+            RunAsync(BuildQuery(from, to), cancellationToken);
+
+        public Task<IReadOnlyDictionary<string, long>> GetExternalViewsAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default) =>
+            RunAsync(BuildExternalQuery(from, to), cancellationToken);
+
+        private async Task<IReadOnlyDictionary<string, long>> RunAsync(string sql, CancellationToken cancellationToken)
         {
-            var sql = BuildQuery(from, to);
             using var request = new HttpRequestMessage(
                 HttpMethod.Post,
                 $"https://api.cloudflare.com/client/v4/accounts/{settings.AccountId}/analytics_engine/sql")
@@ -61,6 +66,18 @@ namespace Pat.Aca.BlogCommentsModerationFunction
             SELECT blob1 AS slug, sum(_sample_interval) AS views
             FROM article_referrers
             WHERE timestamp >= toDateTime('{Format(from)}') AND timestamp < toDateTime('{Format(to)}')
+            GROUP BY slug
+            """;
+
+        /// <summary>
+        /// Like BuildQuery, but only views whose source (blob2) is an outside
+        /// site: not "direct" and not one of the user's own koorevaar hosts.
+        /// </summary>
+        public static string BuildExternalQuery(DateTime from, DateTime to) => $"""
+            SELECT blob1 AS slug, sum(_sample_interval) AS views
+            FROM article_referrers
+            WHERE timestamp >= toDateTime('{Format(from)}') AND timestamp < toDateTime('{Format(to)}')
+              AND blob2 != 'direct' AND blob2 NOT LIKE '%koorevaar%'
             GROUP BY slug
             """;
 
