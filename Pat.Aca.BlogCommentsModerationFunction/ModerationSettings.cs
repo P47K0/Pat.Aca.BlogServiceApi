@@ -13,7 +13,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         /// configurable specifically so it can be swapped without a
         /// redeploy -- see MODERATION_MODEL_ID.
         /// </summary>
-        public string ModerationModelId { get; set; } = "@cf/meta/llama-3.2-1b-instruct";
+        public string ModerationModelId { get; set; } = "@cf/google/gemma-4-26b-a4b-it";
 
         /// <summary>
         /// Max comments scored per day -- protects against a single source

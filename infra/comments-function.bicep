@@ -74,7 +74,7 @@ param acsSenderAddress string
 param acsRecipientEmail string
 
 @description('Cloudflare Workers AI model id -- deployed as a plain app setting so it can be changed later directly in the Function App\'s configuration, without a redeploy')
-param moderationModelId string = '@cf/meta/llama-3.2-1b-instruct'
+param moderationModelId string = '@cf/google/gemma-4-26b-a4b-it'
 
 @description('Max comments scored per day')
 param dailyModerationQuota int = 25

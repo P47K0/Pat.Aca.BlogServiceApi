@@ -112,7 +112,13 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                     // prompt keeps the model from trying to write a long
                     // response in the first place, this is the hard ceiling
                     // in case it ignores that anyway.
-                    max_tokens = 200
+                    max_tokens = 200,
+                    // gemma-4 (the current default model) is a reasoning model:
+                    // by default it thinks first, and with the 200 token cap
+                    // above the thinking uses the whole budget, so the answer
+                    // comes back empty (tested 2026-11-07). This switches the
+                    // thinking off; models without thinking mode ignore it.
+                    chat_template_kwargs = new { enable_thinking = false }
                 })
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _cloudflareSettings.ApiToken);
@@ -148,7 +154,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                         $"Could not parse Cloudflare Workers AI's response envelope: {rawBody}", ex);
                 }
 
-                if (envelope is null || !envelope.Success || envelope.Result?.Response is null)
+                if (envelope is null || !envelope.Success || envelope.Result?.Text is null)
                 {
                     var errorDetail = envelope?.Errors is { Count: > 0 }
                         ? string.Join("; ", envelope.Errors.Select(e => e.Message))
@@ -156,7 +162,7 @@ namespace Pat.Aca.BlogCommentsModerationFunction
                     throw new ModerationScoringException($"Cloudflare Workers AI reported failure: {errorDetail}");
                 }
 
-                return ParseModelResponseText(envelope.Result.Response);
+                return ParseModelResponseText(envelope.Result.Text);
             }
         }
 
@@ -288,7 +294,16 @@ namespace Pat.Aca.BlogCommentsModerationFunction
         // {"result": {"response": "..."}, "success": true, "errors": [], "messages": []}.
         private sealed record CloudflareAiEnvelope(bool Success, CloudflareAiResult? Result, List<CloudflareAiError>? Errors);
 
-        private sealed record CloudflareAiResult(string? Response);
+        // Two response shapes: Llama-family models answer in `response`, gemma-4 in an
+        // OpenAI-style `choices[0].message.content`.
+        private sealed record CloudflareAiResult(string? Response, List<CloudflareAiChoice>? Choices)
+        {
+            public string? Text => Response ?? Choices?.FirstOrDefault()?.Message?.Content;
+        }
+
+        private sealed record CloudflareAiChoice(CloudflareAiMessage? Message);
+
+        private sealed record CloudflareAiMessage(string? Content);
 
         private sealed record CloudflareAiError(int Code, string Message);
 
