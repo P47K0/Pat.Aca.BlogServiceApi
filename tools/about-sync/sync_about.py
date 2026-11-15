@@ -6,6 +6,10 @@ from the homepage export. Run by Claude Code on request. Python stdlib only.
     set -a; . .secrets/claude-tokens.env; set +a
     python3 tools/about-sync/sync_about.py about.md [--dry-run] [--embed-only]
 
+Chunks: blank-line-separated blocks, except that a heading-only block is joined
+to the block after it (chunks()), so "## Certifications" and its list are one
+chunk. Changing this renumbers about-paragraph-{n}: re-run with --embed-only.
+
 Steps: GET the current article; stop if the content is unchanged. Otherwise PUT
 the article with only `content` replaced, then embed every blank-line paragraph
 plus the "{title}. {summary}" chunk with bge-m3 (tools/embeddings: Workers AI
@@ -93,10 +97,36 @@ def token(prefix, scope):
     return j["access_token"]
 
 
-def chunks(content):
-    """Same chunking as every other article: one chunk per non-empty
-    blank-line-separated block, the `# Title` line being paragraph-0."""
+def raw_blocks(content):
+    """One block per non-empty blank-line-separated block, the `# Title` line
+    being block 0 (the chunking every other article still uses)."""
     return [b.strip() for b in re.split(r"\n\s*\n", content) if b.strip()]
+
+
+def chunks(content):
+    """raw_blocks, but a heading-only block is joined to the block after it.
+    A bare `## Certifications` chunk matches a question about certifications
+    but holds no answer, while the list under it (exam codes only) never
+    matches the question: /ask retrieved the heading and answered "I don't
+    have that information" (2026-11-15). Joined, the chunk carries both. A
+    run of headings (`## X` then `### Y`) is joined to the first body block.
+    A heading at the very end stays alone. A `## ` heading over a bullet list also
+    gets a "{Heading} of Patrick Koorevaar:" line, see below."""
+    out, pending = [], []
+    for b in raw_blocks(content):
+        if all(line.startswith("#") for line in b.splitlines()):
+            pending.append(b)
+            continue
+        if pending and pending[-1].startswith("## ") and b.startswith("- "):
+            # A bare list of exam codes or tools embeds weakly even with its
+            # heading (0.45 against "which certificates", rank 14): one
+            # descriptive line lifts it to ~0.6 (measured 2026-11-15).
+            pending = pending + [f"{pending[-1][3:].strip()} of Patrick Koorevaar:"]
+        out.append("\n\n".join(pending + [b]))
+        pending = []
+    if pending:
+        out.append("\n\n".join(pending))
+    return out
 
 
 # `## ` heading in the export -> the homepage section id the assistant widget
@@ -120,7 +150,7 @@ def section_anchors(paragraphs):
     anchors, current = [], None
     for p in paragraphs:
         if p.startswith("## "):
-            heading = p[3:].strip()
+            heading = p.splitlines()[0][3:].strip()  # chunks() may add body text below it
             current = SECTION_ANCHORS.get(heading)
             if current is None:
                 print(f"  note: no anchor for heading {heading!r}")
@@ -138,7 +168,9 @@ def main():
 
     s, article = req("GET", f"{API}/articles/{SLUG}", {"X-Api-Key": E["ARTICLES_API_KEY"]})
     assert s == 200, (s, article)
-    old_count = len(chunks(article["content"]))
+    # The stored chunks follow the chunking of the run that wrote them, which
+    # may be the old one-block-per-chunk split: take the larger count.
+    old_count = max(len(chunks(article["content"])), len(raw_blocks(article["content"])))
     new_chunks = chunks(new_content)
     print(f"old paragraphs {old_count}, new paragraphs {len(new_chunks)}")
     if article["content"] == new_content and not embed_only:
