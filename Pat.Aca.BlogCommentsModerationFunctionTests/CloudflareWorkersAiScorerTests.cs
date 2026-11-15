@@ -201,6 +201,34 @@ namespace Pat.Aca.BlogCommentsModerationFunctionTests
         }
 
         [Fact]
+        public async Task ScoreAsync_turns_thinking_off_so_a_reasoning_model_cannot_use_up_the_token_cap()
+        {
+            var handler = new FakeHttpMessageHandler(
+                HttpStatusCode.OK,
+                "{\"result\": {\"response\": \"{\\\"score\\\": 5, \\\"reason\\\": \\\"Fine.\\\"}\"}, \"success\": true}");
+            var scorer = new CloudflareWorkersAiScorer(new HttpClient(handler), SampleCloudflareSettings(), new ModerationSettings());
+
+            await scorer.ScoreAsync("A comment.", null);
+
+            Assert.NotNull(handler.LastRequestBody);
+            Assert.Contains("\"enable_thinking\":false", handler.LastRequestBody);
+        }
+
+        [Fact]
+        public async Task ScoreAsync_reads_the_openai_style_choices_response_of_gemma_4()
+        {
+            var handler = new FakeHttpMessageHandler(
+                HttpStatusCode.OK,
+                "{\"result\": {\"choices\": [{\"message\": {\"role\": \"assistant\", \"content\": \"```json\\n{\\\"score\\\": 4, \\\"reason\\\": \\\"Relevant.\\\"}\\n```\"}}]}, \"success\": true}");
+            var scorer = new CloudflareWorkersAiScorer(new HttpClient(handler), SampleCloudflareSettings(), new ModerationSettings());
+
+            var score = await scorer.ScoreAsync("A comment.", null);
+
+            Assert.Equal(4, score.Score);
+            Assert.Equal("Relevant.", score.Reason);
+        }
+
+        [Fact]
         public async Task ScoreAsync_includes_the_article_summary_in_the_user_message_when_given()
         {
             var handler = new FakeHttpMessageHandler(

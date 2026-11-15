@@ -43,3 +43,17 @@ Static counters shown on the homepage (e.g. ACA/Function usage counters) are als
 - `/about.md` is served from the homepage's `https://www.koorevaar.com/llms-full.txt` (website repo), with the Cosmos `about` article as fallback. The Cosmos article is also what the assistant's KnowledgeBase embeddings (`about-paragraph-{n}`, `about-summary`) are built from.
 - After a homepage change that changes `llms-full.txt` is deployed, or when the user asks, run `tools/about-sync/sync_about.py` (usage in its docstring): it updates the Cosmos article and re-embeds with the shared `tools/embeddings` client, and does nothing when unchanged. Pass any `STALE` chunk ids it prints to the user to delete by hand.
 - Manual for now. Moving it to a workflow that embeds with Cloudflare Workers AI is an open backlog item ("Generate about.md from the same source as the homepage").
+
+## Workers AI model names
+
+Model ids are spread over code, workflow variables and deployed settings, so after a Cloudflare deprecation notice check all of these (inventory of 2026-11-07, update it when something moves):
+
+- Both the assistant-worker and the moderation Function moved to `@cf/google/gemma-4-26b-a4b-it` (branch feat/gemma-4-models, 2026-11-07; gemma-4 needs `chat_template_kwargs: {enable_thinking: false}`). The moderation default only reaches the live Function App when the infra workflow runs, check `Moderation__ModerationModelId` in Azure afterwards.
+- assistant-worker: constant `GENERATION_MODEL` in `Pat.Aca.BlogServiceApi/Cloudflare/assistant-worker/src/lib/generation.ts`; embeddings (`bge-m3`) in `src/lib/embeddings.ts` and `tools/embeddings/embeddings.py`.
+- Comment moderation Function: default in `ModerationSettings.cs` and bicep param `moderationModelId`. `comments-function-infra.yml` does not pass it, so the live value is the Function App setting `Moderation__ModerationModelId` in Azure. Confirmed live 2026-11-07: `llama-3.2-1b-instruct` (deprecated 2026-11-20). Gotcha: the setting is part of the bicep `appSettings`, so every run of the infra workflow resets it to the bicep default, wiping a value changed in the portal; change the bicep default (or pass the param) as well as the portal.
+- Pat.Aca.HangmanApi (own repo): GitHub repo variable `CF_MODEL_ID`, deployed as `Cloudflare__ModelId` on the ACA by `docker-publish.yml`; the code default in `HangmanRunner.cs` is only a fallback.
+- Website workers (website repo, `cloudflare/`): the files are copies pasted into Cloudflare. As of 2026-11-13 `ollama-worker.js` and `cap-advisor.js` are moved to gemma-4 in the working tree (user pastes them into Cloudflare). gemma-4 specifics there: ollama-worker must send chat `messages` (a raw `prompt` gives rows of `}`); cap-advisor must NOT pass `response_format` json_schema (endless blank lines in 3 of 4 runs), it puts the schema in the prompt and uses json_object. Both send `enable_thinking: false`. `contact-worker.js` uses `llama-3.1-8b-instruct` (no -fp8, not deprecated).
+- Other ACAs: check their environment variables (Azure portal) for `Model`/`@cf/` values.
+- Not in this workspace: the AKS text/sentiment-analysis demo.
+
+Prices: https://developers.cloudflare.com/workers-ai/platform/pricing/index.md (plain curl works). The PAT cannot read GitHub repo variables (403), ask the user for those values.

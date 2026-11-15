@@ -1,23 +1,24 @@
 import type { KnowledgeBaseChunk } from './cosmos-client';
 
-// @cf/meta/llama-3.1-8b-instruct-fp8, not gemma-3-12b-it as originally
-// picked: the account this actually runs under returned a hard 403
-// ("This account is not allowed to access @cf/google/gemma-3-12b-it") on the
-// first live smoke test -- some Workers AI models are account-gated
-// independent of whether they exist in the public catalog, a real
-// constraint the type definitions alone don't reveal. This model is already
-// in active use in this user's other Workers, so it's both known-accessible
-// on this account and genuinely this project's usual 7B/8B default, not a
-// compromise -- earlier searches for it here missed it because it's typed
-// generically as BaseAiTextGeneration (a shared legacy shape covering many
-// older models) rather than getting a model-specific interface the way
-// newer catalog entries do, so a grep for per-model type names skipped
-// right over it. Isolated to this one constant, behind the adapter below,
-// so a future swap stays a one-line change, not a call-site hunt. Same
-// { messages } input / { response: string } output shape as gemma-3-12b-it,
-// so normalizeGenerationResponse() needed no changes -- exactly the
-// scenario that adapter exists for.
-const GENERATION_MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8';
+// @cf/google/gemma-4-26b-a4b-it since 2026-11 (replaces
+// @cf/meta/llama-3.1-8b-instruct-fp8, which Cloudflare deprecates on
+// 2026-11-20). Before that this was llama-3.1-8b-instruct-fp8 because
+// gemma-3-12b-it returned a 403 on this account (some Workers AI models are
+// account-gated independent of the public catalog), so gemma-4 access was
+// checked with a live call first. gemma-4 is a reasoning model: it needs
+// GENERATION_EXTRA_INPUT below, or it spends the output budget on thinking.
+// It answers in the OpenAI-style `choices[0].message.content` shape, which
+// normalizeGenerationResponse() already handles. Tested 2026-11-07 against
+// this prompt: it resists "print your system prompt" (llama-3.1-8b leaked
+// it), uses the NO_ANSWER marker, and answers in English and Dutch.
+// Isolated to this constant behind the adapter below, so a future swap stays
+// a one-line change.
+const GENERATION_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+
+/** Extra model input: switches gemma-4's thinking off (reasoning_effort and
+ * thinking.type were tested and do not work). Models without a thinking
+ * mode ignore it. */
+const GENERATION_EXTRA_INPUT = { chat_template_kwargs: { enable_thinking: false } };
 
 /** The exact, unparaphrased sentence SYSTEM_PROMPT mandates for a non-
  * English/Dutch message (see the language-gate rationale below) -- exported
@@ -121,9 +122,8 @@ function buildContextBlock(chunks: KnowledgeBaseChunk[]): string {
  * plain text -- the adapter this project's own Llama-vs-GLM finding flagged
  * as worth having, so a future model swap means updating this one function,
  * not hunting down call sites. Covers the two response shapes seen across
- * Workers AI chat models: a plain `response` string (gemma-3-12b-it, the
- * current GENERATION_MODEL) and an OpenAI-style `choices[0].message.content`
- * (seen on other Workers AI chat models). */
+ * Workers AI chat models: a plain `response` string (Llama-family models) and an OpenAI-style `choices[0].message.content`
+ * (gemma-4, the current GENERATION_MODEL). */
 function normalizeGenerationResponse(raw: unknown): string {
   const result = raw as { response?: string; choices?: { message?: { content?: string } }[] };
   if (typeof result.response === 'string') {
@@ -151,6 +151,7 @@ export async function generateAnswer(
   chunks: KnowledgeBaseChunk[],
 ): Promise<{ answer: string; unanswered: boolean }> {
   const result = await ai.run(GENERATION_MODEL, {
+    ...GENERATION_EXTRA_INPUT,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: `CONTEXT:\n${buildContextBlock(chunks)}\n\nQUESTION: ${question}` },

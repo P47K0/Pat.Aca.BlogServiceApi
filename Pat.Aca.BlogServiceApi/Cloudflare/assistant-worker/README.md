@@ -20,7 +20,7 @@ project's own conventions:
    can't serve a cross-partition `ORDER BY`), and populates the cache.
 5. Prompt assembly with scoping guardrails + generation call (this commit):
    `POST /ask` now returns a real generated `answer`, grounded in the
-   retrieved `chunks`, via `@cf/google/gemma-3-12b-it` behind a
+   retrieved `chunks`, via `@cf/google/gemma-4-26b-a4b-it` behind a
    response-shape adapter (`src/lib/generation.ts`). Guardrail wording is
    worth a deliberate read in that file before this ever goes live — it's
    the one piece of this Worker that speaks on your behalf.
