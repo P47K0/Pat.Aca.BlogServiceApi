@@ -28,7 +28,7 @@ on:
       labels:
         description: 'Runner labels, comma-separated; keep equal to the laptop runner'
         type: string
-        default: 'self-hosted,Linux'
+        default: 'self-hosted,Linux,deploy'
       max_parallel:
         description: 'Most runners at the same time'
         type: string
