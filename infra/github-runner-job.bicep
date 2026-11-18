@@ -25,7 +25,7 @@ param githubOwner string
 param githubRepo string = ''
 
 @description('Runner labels, comma-separated. Must match the labels of the other runners (e.g. a laptop) so one runs-on value works for both. The scaler only starts a runner for queued jobs that these labels can serve.')
-param runnerLabels string = 'self-hosted,Linux'
+param runnerLabels string = 'self-hosted,Linux,deploy'
 
 @description('GitHub token for the scaler (reads the queued workflow runs) and the runner (registers itself). Stored as an ACA secret.')
 @secure()
