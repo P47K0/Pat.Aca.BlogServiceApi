@@ -34,11 +34,11 @@ on:
         type: string
         default: '4'
       cpu:
-        description: 'vCPU per runner (jobs accept 0.25 to 2)'
+        description: 'vCPU per runner; memory must be twice this in Gi (0.25 to 2.0 in steps of 0.25, e.g. 1.0 with 2Gi)'
         type: string
         default: '2.0'
       memory:
-        description: 'Memory per runner (jobs accept 0.1Gi to 4Gi), e.g. 2Gi'
+        description: 'Memory per runner in Gi, twice the vCPU (0.5Gi to 4Gi), e.g. 2Gi'
         type: string
         default: '4Gi'
       build_image:
