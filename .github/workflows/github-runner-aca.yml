@@ -34,11 +34,11 @@ on:
         type: string
         default: '4'
       cpu:
-        description: 'vCPU per runner (ACA pairs it with memory: 0.5/1Gi, 1.0/2Gi, 1.5/3Gi, 2.0/4Gi)'
+        description: 'vCPU per runner (jobs accept 0.25 to 2)'
         type: string
         default: '2.0'
       memory:
-        description: 'Memory per runner, e.g. 4Gi'
+        description: 'Memory per runner (jobs accept 0.1Gi to 4Gi), e.g. 2Gi'
         type: string
         default: '4Gi'
       build_image:
