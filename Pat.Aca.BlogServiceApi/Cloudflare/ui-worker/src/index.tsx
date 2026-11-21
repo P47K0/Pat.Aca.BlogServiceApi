@@ -363,6 +363,11 @@ app.get('/BingSiteAuth.xml', (c) =>
   ),
 );
 
+// IndexNow ownership key. Public by design (engines fetch it to verify the
+// pings); must match IndexNowSettings.Key in the Change Feed Function.
+const INDEXNOW_KEY = 'e6404dec318e412daad2061f7710859f';
+app.get(`/${INDEXNOW_KEY}.txt`, (c) => c.text(INDEXNOW_KEY));
+
 // Lets search engines discover every article without waiting on crawl-only
 // link discovery — built straight from the same getArticles() list the home
 // page already fetches, no new data needed.
