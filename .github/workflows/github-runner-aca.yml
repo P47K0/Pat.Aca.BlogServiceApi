@@ -33,6 +33,14 @@ on:
         description: 'Most runners at the same time'
         type: string
         default: '4'
+      cpu:
+        description: 'vCPU per runner (ACA pairs it with memory: 0.5/1Gi, 1.0/2Gi, 1.5/3Gi, 2.0/4Gi)'
+        type: string
+        default: '2.0'
+      memory:
+        description: 'Memory per runner, e.g. 4Gi'
+        type: string
+        default: '4Gi'
       build_image:
         description: 'Build and push the image first (off = deploy the existing :latest)'
         type: boolean
@@ -102,6 +110,8 @@ jobs:
           RUNNER_GITHUB_PAT: ${{ secrets.RUNNER_GITHUB_PAT }}
           LABELS: ${{ inputs.labels }}
           MAX_PARALLEL: ${{ inputs.max_parallel }}
+          CPU: ${{ inputs.cpu }}
+          MEMORY: ${{ inputs.memory }}
           IMAGE_TAG: ${{ inputs.build_image && format('gha-{0}', github.run_id) || 'latest' }}
         run: |
           set -euo pipefail
@@ -123,6 +133,8 @@ jobs:
               githubRepo="$REPO" \
               runnerLabels="$LABELS" \
               maxParallel="$MAX_PARALLEL" \
+              cpu="$CPU" \
+              memory="$MEMORY" \
               githubPat="$RUNNER_GITHUB_PAT"
 
           echo "::notice::Container Apps Job $JOB_NAME deployed with image $DOCKERHUB_USERNAME/github-runner:$IMAGE_TAG"
