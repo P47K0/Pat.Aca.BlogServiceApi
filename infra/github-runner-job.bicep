@@ -51,11 +51,11 @@ param replicaTimeoutSeconds int = 2700
 @minValue(0)
 param idleTimeoutSeconds int = 300
 
-@description('vCPU per runner')
-param cpu string = '2.0'
+@description('vCPU per runner. ACA only accepts the pairs 0.25/0.5Gi up to 2.0/4Gi in steps of 0.25 cpu / 0.5Gi')
+param cpu string = '1.0'
 
 @description('Memory per runner')
-param memory string = '4Gi'
+param memory string = '2Gi'
 
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
   name: environmentName
