@@ -10,7 +10,7 @@
 #   GITHUB_REPO     repository name (scope repo only)
 #   RUNNER_LABELS   comma-separated, e.g. self-hosted,Linux
 #   GITHUB_API_URL  optional, default https://api.github.com
-#   RUNNER_IDLE_TIMEOUT_SECONDS  optional, default 300; 0 = wait for a job until the replica timeout
+#   RUNNER_IDLE_TIMEOUT_SECONDS  optional, default 300 (the Bicep sets 90); 0 = wait for a job until the replica timeout
 set -euo pipefail
 
 : "${GITHUB_PAT:?GITHUB_PAT is not set}"

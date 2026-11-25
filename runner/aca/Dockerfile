@@ -17,6 +17,7 @@ FROM ghcr.io/actions/actions-runner:latest
 ARG INSTALL_NODE=true
 ARG NODE_MAJOR=22
 ARG INSTALL_PLAYWRIGHT=true
+ARG PLAYWRIGHT_VERSION=1.65.1
 ARG INSTALL_DOTNET=false
 ARG DOTNET_CHANNEL=10.0
 ARG PREFETCH_ACTIONS="actions/checkout@v4 actions/setup-node@v4 actions/upload-artifact@v4 azure/login@v2"
@@ -73,7 +74,7 @@ RUN if [ "$INSTALL_NODE" = "true" ]; then \
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN if [ "$INSTALL_PLAYWRIGHT" = "true" ]; then \
       [ "$INSTALL_NODE" = "true" ] || { echo "INSTALL_PLAYWRIGHT needs INSTALL_NODE=true"; exit 1; }; \
-      npm install -g playwright \
+      npm install -g playwright@${PLAYWRIGHT_VERSION} \
       && playwright install --with-deps chromium \
       && chmod -R a+rwX "$PLAYWRIGHT_BROWSERS_PATH" \
       && rm -rf /var/lib/apt/lists/* ~/.npm; \

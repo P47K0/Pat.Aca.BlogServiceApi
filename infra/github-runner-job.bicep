@@ -49,7 +49,7 @@ param replicaTimeoutSeconds int = 2700
 
 @description('Seconds a runner waits for its first job before it stops. A runner whose job the laptop took first would otherwise idle, billed, until the replica timeout. 0 = no idle exit.')
 @minValue(0)
-param idleTimeoutSeconds int = 300
+param idleTimeoutSeconds int = 90
 
 @description('vCPU per runner. ACA only accepts the pairs 0.25/0.5Gi up to 2.0/4Gi in steps of 0.25 cpu / 0.5Gi')
 param cpu string = '1.0'
