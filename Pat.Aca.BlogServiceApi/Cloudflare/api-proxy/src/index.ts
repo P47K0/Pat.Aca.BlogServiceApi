@@ -139,7 +139,8 @@ interface Article {
  * assistant series had at the end of their own `content`. */
 const ARTICLE_FOOTER =
   '*Co-authored with Claude.*\n\nIf this was useful, [you can buy me a coffee](https://ko-fi.com/p47k0).\n\n' +
-  'New articles: [follow via RSS](https://blog.koorevaar.com/feed.xml).';
+  'New articles: [follow via RSS](https://blog.koorevaar.com/feed.xml).\n\n' +
+  "Let's connect on [LinkedIn](https://nl.linkedin.com/in/patrickkoorevaar).";
 
 /** Every article's Markdown source conventionally opens with a `# Title`
  * line mirroring `article.title` — but ArticleDetailPage (ui-worker) already
